@@ -82,7 +82,7 @@ class Vote(models.Model):
 
 class LeaderPromise(models.Model):
     candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE, related_name='promises')
-    promise = models.TextField()
+    promise = models.TextField(null=True, blank=True)
     timestamp = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

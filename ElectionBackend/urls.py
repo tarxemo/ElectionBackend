@@ -9,11 +9,12 @@ from election.backups import *
 urlpatterns = [
     path("graphql/", csrf_exempt(GraphQLView.as_view(graphiql=True))),
     path('admin/', admin.site.urls),
-    path("upload-students/", import_students_from_csv, name="upload_students"),
-    path("select-candidates/", select_candidates, name="select_candidates"),
+    
+    path("upload-students/", import_students_from_csv, name="upload_students"),#create sudents
+    path("select-candidates/", select_candidates, name="select_candidates"),#
     path("random-voting/", random_voting, name="random_voting"),
     path("random-ratings/", random_leader_ratings, name="random_leader_ratings"),
-    path('randomize-votes/', randomize_vote_timestamps, name='randomize_votes'),
+    path('randomize-timestamps-to-votes/', randomize_vote_timestamps, name='randomize_votes'),
 ]
 from django.conf import settings
 from django.conf.urls.static import static

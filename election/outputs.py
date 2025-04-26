@@ -2,6 +2,13 @@ import graphene
 from graphene import ObjectType, DateTime, Decimal, UUID
 from .models import University, College, Hostel, Student, Position, Candidate, Election, Vote, LeaderPromise, PromiseImplementation, LeaderRating
 
+class ElectionStats(graphene.ObjectType):
+    active_elections = graphene.Int()
+    total_votes = graphene.Int()
+    registered_voters = graphene.Int()
+    total_candidates = graphene.Int()
+    participation_rate = graphene.Float()
+    
 # Output Object for User
 class UserOutput(ObjectType):
     id = graphene.ID()
