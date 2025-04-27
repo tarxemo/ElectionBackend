@@ -1,9 +1,11 @@
+from election.mutations.mutations import Mutation
+from election.queries.positions import PositionQuery
 import graphene
-from election.statistics import StatisticsQuery
-from election.views import Mutation
-from election.schema import Query
+# from election.statistics import StatisticsQuery
+# from election.views import Mutation
+# from election.schema import Query
 
-class RootQuery(Query, StatisticsQuery, graphene.ObjectType):
+class RootQuery(PositionQuery, graphene.ObjectType):
     pass
 
 class RootMutation(Mutation, graphene.ObjectType):

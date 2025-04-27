@@ -4,7 +4,7 @@ import random
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.http import JsonResponse
-from election.models import Student, Hostel, University
+# from election.models import Student, Hostel, University
 
 def import_students_from_csv(request):
     """ Reads 'Salaries.csv' directly from the 'election' app and creates Student users. """
