@@ -9,6 +9,11 @@ class InstitutionLevelType(DjangoObjectType):
         model = InstitutionLevel
         fields = '__all__'
 
+class AcademicYearType(DjangoObjectType):
+    class Meta:
+        model = AcademicYear
+        fields = '__all__'
+        
 class InstitutionType(DjangoObjectType):
     class Meta:
         model = Institution
@@ -53,7 +58,7 @@ class PositionType(DjangoObjectType):
     def resolve_candidate_count(self, info):
         # Correct path: Position -> ElectionPosition -> Candidate
         return Candidate.objects.filter(election_position__position=self).count()
-
+ 
 
 class PositionFilterInput(graphene.InputObjectType):
     search = graphene.String()
@@ -70,6 +75,8 @@ class PositionStatsType(graphene.ObjectType):
     with_candidates = graphene.Int()
 
 class PositionQuery(graphene.ObjectType):
+    all_institutions = graphene.List(InstitutionType)
+    academic_years = graphene.List(AcademicYearType)
     all_positions = graphene.List(
         PositionType,
         filters=PositionFilterInput(),
@@ -126,3 +133,9 @@ class PositionQuery(graphene.ObjectType):
             })
         
         return stats
+
+    def resolve_all_institutions(self, info):
+        return Institution.objects.filter(parent__isnull=True)
+
+    def resolve_academic_years(self, info):
+        return AcademicYear.objects.all()
