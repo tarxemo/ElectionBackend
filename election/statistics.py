@@ -43,6 +43,9 @@ class PromiseImplementationType(DjangoObjectType):
 class PositionType(DjangoObjectType):
     class Meta:
         model = Position
+    level = graphene.String()
+    def resolve_level(self, info):
+        return self.level()
 
 class VoterTurnoutType(graphene.ObjectType):
     name = graphene.String()
