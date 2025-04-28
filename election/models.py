@@ -120,9 +120,9 @@ class Candidate(models.Model):
         return f"{self.student} for {self.election_position.position}"
 
 class Vote(models.Model):
-    election = models.ForeignKey(Election, on_delete=models.CASCADE)
-    candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE)
-    voter = models.ForeignKey(Student, on_delete=models.CASCADE)
+    election = models.ForeignKey(Election, on_delete=models.CASCADE, related_name='votes')
+    candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE, related_name='votes')
+    voter = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='votes_cast')
     timestamp = models.DateTimeField(auto_now_add=True)
     weight = models.PositiveIntegerField(default=1)  # For weighted voting
     
