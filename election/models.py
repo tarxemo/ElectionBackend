@@ -14,6 +14,7 @@ class AcademicYear(models.Model):
     def __str__(self):
         return self.name
 
+
 class InstitutionLevel(models.Model):
     LEVEL_CHOICES = [
         ('UNIVERSITY', 'University'),
@@ -38,6 +39,9 @@ class Institution(models.Model):
     
     def __str__(self):
         return f"{self.name} ({self.level})"
+
+
+
 
 class Position(models.Model):
     name = models.CharField(max_length=255)

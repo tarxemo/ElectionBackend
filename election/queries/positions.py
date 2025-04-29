@@ -1,7 +1,7 @@
 # schema.py
 import graphene
 from graphene_django import DjangoObjectType
-from election.models import Candidate, InstitutionLevel, Position, Institution, AcademicYear, Election
+from election.models import Candidate, ElectionPosition, ElectionResult, InstitutionLevel, Position, Institution, AcademicYear, Election
 from django.db.models import Q
 
 class InstitutionLevelType(DjangoObjectType):
@@ -139,3 +139,7 @@ class PositionQuery(graphene.ObjectType):
 
     def resolve_academic_years(self, info):
         return AcademicYear.objects.all()
+
+
+
+
