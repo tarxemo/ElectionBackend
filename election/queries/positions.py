@@ -1,8 +1,32 @@
 # schema.py
 import graphene
 from graphene_django import DjangoObjectType
-from election.models import Candidate, ElectionPosition, ElectionResult, InstitutionLevel, Position, Institution, AcademicYear, Election
+from election.models import Candidate, ElectionPosition, ElectionResult, InstitutionLevel, Leader, Position, Institution, AcademicYear, Election, Promise, PromiseUpdate, Rating, Student, Vote
 from django.db.models import Q
+import datetime
+from django.db.models import Avg
+from django.contrib.auth.models import User  # Assuming you're using the default User model
+from django.db.models import Count, DateTimeField
+from django.db.models.functions import TruncHour
+from collections import defaultdict
+from django.db.models.functions import TruncDay 
+from django.db.models.functions import TruncDate  # Import this
+from django.db.models import Count, DateTimeField
+from django.db.models.functions import Trunc
+
+from django.db.models import Count, Sum, Avg, Q
+from django.db.models.functions import TruncDate
+
+class UserType(DjangoObjectType):
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'first_name', 'last_name', 'email', 'full_name')  # Customize the fields as needed
+
+    full_name = graphene.String()
+
+    # Custom resolver for full_name
+    def resolve_full_name(self, info):
+        return self.get_full_name()
 
 class InstitutionLevelType(DjangoObjectType):
     class Meta:
@@ -13,7 +37,8 @@ class AcademicYearType(DjangoObjectType):
     class Meta:
         model = AcademicYear
         fields = '__all__'
-        
+
+
 class InstitutionType(DjangoObjectType):
     class Meta:
         model = Institution
@@ -58,7 +83,125 @@ class PositionType(DjangoObjectType):
     def resolve_candidate_count(self, info):
         # Correct path: Position -> ElectionPosition -> Candidate
         return Candidate.objects.filter(election_position__position=self).count()
- 
+
+class StudentType(DjangoObjectType):
+    class Meta:
+        model = Student
+        fields = '__all__'  # You can specify the fields you want to expose, or just use '__all__' to expose everything
+    
+    # Optionally, you can add custom fields if needed
+    full_name = graphene.String()
+    academic_year = graphene.Field(AcademicYearType)
+    institution = graphene.Field(InstitutionType)
+    user = graphene.Field(UserType)
+
+    # Optionally, a custom resolver for the full name
+    def resolve_full_name(self, info):
+        return self.user.get_full_name()  # Assuming 'user' is a ForeignKey to a User model
+    
+    def resolve_academic_year(self, info):
+        return self.academic_year
+
+    def resolve_institution(self, info):
+        return self.institution
+    
+    def resolve_user(self, info):
+        return self.user 
+     # Changed from TruncHour
+
+class VoteRateType(graphene.ObjectType):
+    date = graphene.DateTime()  # Or use Date() if you want just the date part
+    vote_count = graphene.Int()
+    
+class CandidateType(DjangoObjectType):
+    class Meta:
+        model = Candidate
+        fields = '__all__'
+
+    # Define the student field explicitly
+    student = graphene.Field(StudentType)  # Assuming you have a StudentType for the Student model
+
+    # Add a resolver for the student field
+    def resolve_student(self, info):
+        return self.student  # Return the related Student object
+
+    vote_count = graphene.Int()
+    vote_percentage = graphene.Float()
+    is_winner = graphene.Boolean()
+    promises_count = graphene.Int()
+    rating = graphene.Float()
+    vote_rates = graphene.List(
+        VoteRateType,
+        granularity=graphene.String(),
+        limit=graphene.Int()
+        )
+
+    def resolve_vote_count(self, info):
+        # Use reverse relationship to count votes for this candidate
+        return Vote.objects.filter(candidate=self).count()
+
+    def resolve_vote_percentage(self, info):
+        total_votes = Vote.objects.filter(
+            election=self.election_position.election,
+            candidate__election_position=self.election_position
+        ).count()
+        if total_votes > 0:
+            return (Vote.objects.filter(candidate=self).count() / total_votes) * 100
+        return 0
+
+    def resolve_is_winner(self, info):
+        return ElectionResult.objects.filter(
+            candidate=self,
+            is_winner=True
+        ).exists()
+
+    def resolve_promises_count(self, info):
+        return Promise.objects.filter(candidate=self).count()
+
+    def resolve_rating(self, info):
+        if hasattr(self, 'leader'):
+            return Rating.objects.filter(
+                leader=self.leader
+            ).aggregate(Avg('score'))['score__avg']
+        return None
+      # New field for daily rates
+    
+    def resolve_vote_rates(self, info, granularity="day", limit=50):
+        # Determine the truncation based on granularity
+        trunc_kind = {
+            'minute': 'minute',
+            'hour': 'hour',
+            'day': 'day'
+        }.get(granularity, 'day')  # default to day
+        
+        # Query to get vote counts with the specified granularity
+        vote_rates = (
+            self.votes.annotate(
+                time_period=Trunc('timestamp', trunc_kind)
+            )
+            .values('time_period')
+            .annotate(vote_count=Count('id'))
+            .order_by('-time_period')[:limit]  # Get most recent N periods
+        )
+
+        return [
+            VoteRateType(date=rate['time_period'], vote_count=rate['vote_count'])
+            for rate in vote_rates
+        ]
+
+class VoteTimeSeriesType(graphene.ObjectType):
+    timestamp = graphene.DateTime()
+    count = graphene.Int()
+    candidate_id = graphene.ID()
+
+class PositionDetailsType(graphene.ObjectType):
+    position = graphene.Field(PositionType)
+    candidates = graphene.List(CandidateType)
+    vote_time_series = graphene.List(VoteTimeSeriesType)
+    total_voters = graphene.Int()
+    total_votes = graphene.Int()
+    is_election_active = graphene.Boolean()
+    winner = graphene.Field(CandidateType)
 
 class PositionFilterInput(graphene.InputObjectType):
     search = graphene.String()
@@ -74,6 +217,173 @@ class PositionStatsType(graphene.ObjectType):
     with_elections = graphene.Int()
     with_candidates = graphene.Int()
 
+class VoteDistributionType(graphene.ObjectType):
+    candidate_id = graphene.ID()
+    candidate_name = graphene.String()
+    vote_count = graphene.Int()
+    vote_percentage = graphene.Float()
+    is_winner = graphene.Boolean()
+
+class InstitutionalVoteType(graphene.ObjectType):
+    institution_name = graphene.String()
+    vote_count = graphene.Int()
+    vote_percentage = graphene.Float()
+
+class VoteStatistics(graphene.ObjectType):
+    vote_time_series = graphene.List(VoteRateType)
+    vote_distribution = graphene.List(VoteDistributionType)
+    cumulative_votes = graphene.List(VoteRateType)
+    institutional_breakdown = graphene.List(InstitutionalVoteType)
+    
+class ElectionType(DjangoObjectType):
+    class Meta:
+        model = Election
+        fields = '__all__'
+
+class ElectionPositionType(DjangoObjectType):
+    class Meta:
+        model = ElectionPosition
+        fields = '__all__'
+
+class ElectionResultType(DjangoObjectType):
+    class Meta:
+        model = ElectionResult
+        fields = '__all__'
+
+class LeaderType(DjangoObjectType):
+    class Meta:
+        model = Leader
+        fields = '__all__'
+
+class RatingType(DjangoObjectType):
+    class Meta:
+        model = Rating
+        fields = '__all__'
+
+class PromiseUpdateType(DjangoObjectType):
+    class Meta:
+        model = PromiseUpdate
+        fields = '__all__'
+        
+class PromiseType(DjangoObjectType):
+    class Meta:
+        model = Promise
+        fields = '__all__'
+    promise_updates = graphene.List(PromiseUpdateType)
+    def resolve_promise_updates(self, info):
+        return self.promise_updates.all()
+    
+class CandidateDetails(graphene.ObjectType):
+    candidate = graphene.Field(CandidateType)
+    election_details = graphene.Field(ElectionType)
+    position_details = graphene.Field(PositionType)
+    competitors = graphene.List(CandidateType)
+    election_results = graphene.Field(ElectionResultType)
+    vote_statistics = graphene.Field(VoteStatistics)
+    leader_info = graphene.Field(LeaderType)
+    ratings = graphene.List(RatingType)
+    promises = graphene.List(PromiseType)
+    
+    
+    
+    
+    
+def get_vote_statistics(candidate, election_position):
+    return VoteStatistics(
+        vote_time_series=get_time_series_data(candidate, election_position),
+        vote_distribution=get_vote_distribution(candidate, election_position),
+        cumulative_votes=get_cumulative_votes(candidate, election_position),
+        institutional_breakdown=get_institutional_breakdown(candidate, election_position)
+    )
+    
+# def get_vote_statistics(self, candidate, election_position):
+#     return VoteStatistics(
+#         vote_time_series=self._get_time_series_data(candidate, election_position),
+#         vote_distribution=self._get_vote_distribution(candidate, election_position),
+#         cumulative_votes=self._get_cumulative_votes(candidate, election_position),
+#         institutional_breakdown=self._get_institutional_breakdown(candidate, election_position)
+#     )
+
+def get_time_series_data(candidate, election_position):
+    thirty_days_ago = datetime.datetime.now() - datetime.timedelta(days=30)
+    votes = (
+        candidate.votes
+        .filter(timestamp__gte=thirty_days_ago)
+        .annotate(date=TruncDate('timestamp'))
+        .values('date')
+        .annotate(vote_count=Count('id'))
+        .order_by('date')
+    )
+    return [
+        VoteRateType(date=vote['date'], vote_count=vote['vote_count'])
+        for vote in votes
+    ]
+
+def get_vote_distribution(candidate, election_position):
+    candidates = (
+        Candidate.objects
+        .filter(election_position=election_position)
+        .annotate(vote_count=Count('votes'))
+    )
+    total_votes = sum(c.vote_count for c in candidates) or 1
+    
+    return [
+        VoteDistributionType(
+            candidate_id=c.id,
+            candidate_name=f"{c.student.user.first_name} {c.student.user.last_name}",
+            vote_count=c.vote_count,
+            vote_percentage=(c.vote_count / total_votes) * 100,
+            is_winner=c.id == candidate.id and election_position.election.status == 'COMPLETED'
+        ) for c in candidates
+    ]
+
+def get_cumulative_votes(candidate, election_position):
+    votes = (
+        candidate.votes
+        .annotate(date=TruncDate('timestamp'))
+        .values('date')
+        .annotate(vote_count=Count('id'))
+        .order_by('date')
+    )
+    
+    cumulative = 0
+    cumulative_votes = []
+    for vote in votes:
+        cumulative += vote['vote_count']
+        cumulative_votes.append(
+            VoteRateType(
+                date=vote['date'],
+                vote_count=cumulative
+            )
+        )
+    return cumulative_votes
+
+def get_institutional_breakdown(candidate, election_position):
+    votes = (
+        candidate.votes
+        .filter(election=election_position.election)
+        .values('voter__institution__name')
+        .annotate(
+            vote_count=Count('id'),
+            total_votes=Count('id', filter=Q(election=election_position.election))
+        )
+    )
+    total_votes = votes.aggregate(total=Sum('vote_count'))['total'] or 1
+    
+    return [
+        InstitutionalVoteType(
+            institution_name=vote['voter__institution__name'],
+            vote_count=vote['vote_count'],
+            vote_percentage=(vote['vote_count'] / total_votes) * 100
+        ) for vote in votes
+    ]
+
+    
+    
+    
+    
+    
+
 class PositionQuery(graphene.ObjectType):
     all_institutions = graphene.List(InstitutionType)
     academic_years = graphene.List(AcademicYearType)
@@ -84,6 +394,12 @@ class PositionQuery(graphene.ObjectType):
         skip=graphene.Int()
     )
     position_stats = graphene.List(PositionStatsType)
+    position_details = graphene.Field(
+        PositionDetailsType,
+        position_id=graphene.ID(required=True),
+        election_id=graphene.ID(required=False),
+        academic_year_id=graphene.ID(required=False)  # Add academic_year_id parameter
+    )
     
     def resolve_all_positions(self, info, filters=None, first=None, skip=None, **kwargs):
         qs = Position.objects.all()
@@ -119,27 +435,220 @@ class PositionQuery(graphene.ObjectType):
     
     def resolve_position_stats(self, info, **kwargs):
         stats = []
+        
+        # Prefetch related elections and candidates to minimize queries
         levels = InstitutionLevel.objects.all()
         
         for level in levels:
-            positions = Position.objects.filter(level=level)
+            positions = Position.objects.filter(level=level).prefetch_related(
+                'elections',  # Prefetch related elections for each position
+                'electionposition__candidate'  # Prefetch related candidates
+            )
+
+            total_positions = positions.count()
+            positions_with_elections = positions.filter(elections__isnull=False).distinct().count()
+            positions_with_candidates = positions.filter(
+                electionposition__candidate__isnull=False
+            ).distinct().count()
+
             stats.append({
                 'level': level.get_level_display(),
-                'count': positions.count(),
-                'with_elections': positions.filter(elections__isnull=False).distinct().count(),
-                'with_candidates': positions.filter(
-                    electionposition__candidate__isnull=False
-                ).distinct().count()
+                'count': total_positions,
+                'with_elections': positions_with_elections,
+                'with_candidates': positions_with_candidates
             })
         
         return stats
+
 
     def resolve_all_institutions(self, info):
         return Institution.objects.filter(parent__isnull=True)
 
     def resolve_academic_years(self, info):
         return AcademicYear.objects.all()
+<<<<<<< HEAD
 
 
 
 
+=======
+        
+
+    def resolve_position_details(self, info, position_id, election_id=None, academic_year_id=None):
+        # Fetch the position object
+        position = Position.objects.get(id=position_id)
+
+        # Build the base query for election position
+        election_position_query = position.electionposition_set.all()
+        
+        # Filter by election_id if provided
+        if election_id:
+            election_position_query = election_position_query.filter(election_id=election_id)
+        
+        # Filter by academic_year_id if provided
+        # if academic_year_id:
+        #     election_position_query = election_position_query.filter(
+        #     electionposition__election__academic_year_id=academic_year_id
+        # ).distinct()
+        
+        election_position = election_position_query.first()
+        
+        if not election_position:
+            return None
+
+        # Fetch candidates
+        candidates = election_position.candidate_set.all()
+        if academic_year_id:
+            candidates = candidates.filter(election_position__election__academic_year__id = academic_year_id)
+
+        # Define time range
+        now = datetime.datetime.now()
+        if election_position.election.status == 'ACTIVE':
+            time_threshold = now - datetime.timedelta(hours=24)
+            time_window = datetime.timedelta(hours=1)
+        else:
+            time_threshold = election_position.election.start_datetime
+            time_window = datetime.timedelta(hours=6)
+
+        # Fetch votes for this election position
+        votes = Vote.objects.filter(
+            election=election_position.election,
+            candidate__election_position=election_position,
+            timestamp__gte=time_threshold
+        ).order_by('timestamp')
+
+        # Set up time buckets
+        current_window_start = time_threshold
+        vote_counts = {candidate.id: 0 for candidate in candidates}
+        vote_time_series = []
+
+        for vote in votes:
+            # Advance time window if needed
+            while vote.timestamp >= current_window_start + time_window:
+                for candidate in candidates:
+                    # Calculate rate: votes per hour
+                    hours = time_window.total_seconds() / 3600
+                    vote_rate = vote_counts[candidate.id] / hours
+                    vote_time_series.append({
+                        'timestamp': current_window_start,
+                        'candidate_id': candidate.id,
+                        'vote_count': vote_counts[candidate.id],
+                        'vote_rate_per_hour': vote_rate
+                    })
+                current_window_start += time_window
+                vote_counts = {candidate.id: 0 for candidate in candidates}
+            
+            # Tally vote
+            vote_counts[vote.candidate.id] += 1
+
+        # Final window
+        for candidate in candidates:
+            hours = time_window.total_seconds() / 3600
+            vote_rate = vote_counts[candidate.id] / hours
+            vote_time_series.append({
+                'timestamp': current_window_start,
+                'candidate_id': candidate.id,
+                'vote_count': vote_counts[candidate.id],
+                'vote_rate_per_hour': vote_rate
+            })
+
+        # Total voters
+        if position.level.level == 'HOSTEL':
+            total_voters = Student.objects.filter(
+                institution=position.institution
+            ).count()
+        elif position.level.level == 'COLLEGE':
+            total_voters = Student.objects.filter(
+                institution=position.institution.parent
+            ).count()
+        else:  # UNIVERSITY
+            total_voters = Student.objects.count()
+        
+        # Total votes
+        total_votes = Vote.objects.filter(
+            election=election_position.election,
+            candidate__election_position=election_position
+        ).count()
+        
+        # Winner
+        winner_result = ElectionResult.objects.filter(
+            election=election_position.election,
+            candidate__election_position=election_position,
+            is_winner=True
+        ).first()
+        winner = winner_result.candidate if winner_result else None
+
+        return {
+            'position': position,
+            'candidates': candidates,
+            'vote_time_series': vote_time_series,
+            'total_voters': total_voters,
+            'total_votes': total_votes,
+            'is_election_active': election_position.election.status == 'ACTIVE',
+            'winner': winner
+        }
+
+    candidate_details = graphene.Field(
+        CandidateDetails,
+        candidate_id=graphene.ID(required=True)
+    )
+
+    def resolve_candidate_details(root, info, candidate_id):
+        try:
+            candidate = Candidate.objects.select_related(
+                'student__user',
+                'student__institution',
+                'student__academic_year',
+                'election_position__election',
+                'election_position__position'
+            ).get(id=candidate_id)
+        except Candidate.DoesNotExist:
+            return None
+
+        election_position = candidate.election_position
+        election = election_position.election
+        position = election_position.position
+
+        competitors = Candidate.objects.filter(
+            election_position=election_position
+        ).exclude(id=candidate.id).select_related(
+            'student__user',
+            'student__institution'
+        )
+
+        election_results = ElectionResult.objects.filter(
+            election=election,
+            candidate=candidate
+        ).first()
+
+        vote_statistics = get_vote_statistics(candidate, election_position)
+
+        leader_info = None
+        ratings = []
+        promises = []
+        if election_results and election_results.is_winner:
+            leader_info = Leader.objects.filter(
+                candidate=candidate,
+                position=position
+            ).first()
+            
+            ratings = Rating.objects.filter(
+                leader__candidate=candidate
+            ).select_related('student__user')
+            
+            promises = Promise.objects.filter(
+                candidate=candidate
+            ).prefetch_related('promiseupdate_set')
+
+        return CandidateDetails(
+            candidate=candidate,
+            election_details=election,
+            position_details=position,
+            competitors=competitors,
+            election_results=election_results,
+            vote_statistics=vote_statistics,
+            leader_info=leader_info,
+            ratings=ratings,
+            promises=promises
+        )
+>>>>>>> b653f8f2992acf92c5a4b3bb3436d152abf63d85
