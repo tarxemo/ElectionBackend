@@ -12,6 +12,7 @@ from collections import defaultdict
 from django.db.models.functions import TruncDay 
 from django.db.models.functions import TruncDate  # Import this
 from django.db.models import Count, DateTimeField
+from django.db.models.functions import Trunc
 
 from django.db.models import Count, Sum, Avg, Q
 from django.db.models.functions import TruncDate
@@ -129,7 +130,11 @@ class CandidateType(DjangoObjectType):
     is_winner = graphene.Boolean()
     promises_count = graphene.Int()
     rating = graphene.Float()
-    vote_rates = graphene.List(VoteRateType)
+    vote_rates = graphene.List(
+        VoteRateType,
+        granularity=graphene.String(),
+        limit=graphene.Int()
+        )
 
     def resolve_vote_count(self, info):
         # Use reverse relationship to count votes for this candidate
@@ -161,19 +166,26 @@ class CandidateType(DjangoObjectType):
         return None
       # New field for daily rates
     
-    def resolve_vote_rates(self, info):
-        # Query to get vote counts per day for this candidate
+    def resolve_vote_rates(self, info, granularity="day", limit=50):
+        # Determine the truncation based on granularity
+        trunc_kind = {
+            'minute': 'minute',
+            'hour': 'hour',
+            'day': 'day'
+        }.get(granularity, 'day')  # default to day
+        
+        # Query to get vote counts with the specified granularity
         vote_rates = (
             self.votes.annotate(
-                day=TruncDate('timestamp')  # Aggregate by date (not hour)
+                time_period=Trunc('timestamp', trunc_kind)
             )
-            .values('day')
+            .values('time_period')
             .annotate(vote_count=Count('id'))
-            .order_by('day')
+            .order_by('-time_period')[:limit]  # Get most recent N periods
         )
 
         return [
-            VoteRateType(date=rate['day'], vote_count=rate['vote_count'])
+            VoteRateType(date=rate['time_period'], vote_count=rate['vote_count'])
             for rate in vote_rates
         ]
 
