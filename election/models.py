@@ -183,7 +183,7 @@ class PromiseUpdate(models.Model):
         ('FAILED', 'Failed'),
     ]
     
-    promise = models.ForeignKey(Promise, on_delete=models.CASCADE)
+    promise = models.ForeignKey(Promise, on_delete=models.CASCADE, related_name="promise_updates")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='NOT_STARTED')
     update = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
