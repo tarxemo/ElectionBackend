@@ -105,9 +105,9 @@ WSGI_APPLICATION = 'ElectionBackend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'election1',
-        'USER': 'tarxemo',
-        'PASSWORD': '123456',
+        'NAME': 'election3',
+        'USER': 'tintin',
+        'PASSWORD': '123456789',
         'HOST': 'localhost',  # Or your database server IP
         'PORT': '5432',  # Default PostgreSQL port
     }
