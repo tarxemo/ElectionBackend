@@ -1,3 +1,4 @@
+# from election.queries.candidate import CandidateQuery
 from election.mutations.mutations import Mutation
 from election.queries.positions import PositionQuery
 import graphene

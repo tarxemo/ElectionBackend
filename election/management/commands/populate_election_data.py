@@ -224,8 +224,8 @@ class Command(BaseCommand):
                 with open(csv_file, 'r') as f:
                     reader = csv.DictReader(f)
                     for i, row in enumerate(reader):
-                        if i >= max_students:
-                            break
+                        # if i >= max_students:
+                        #     break
                         
                         full_name = row.get('EmployeeName', '').strip()
                         if not full_name:
