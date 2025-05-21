@@ -244,7 +244,10 @@ class ElectionPositionType(DjangoObjectType):
     class Meta:
         model = ElectionPosition
         fields = '__all__'
-
+    level = graphene.Field(InstitutionLevelType)
+    def resolve_revel(self, info):
+        return self.position.level
+    
 class ElectionResultType(DjangoObjectType):
     class Meta:
         model = ElectionResult
@@ -471,30 +474,28 @@ class PositionQuery(graphene.ObjectType):
     def resolve_position_details(self, info, position_id, election_id=None, academic_year_id=None):
         # Fetch the position object
         position = Position.objects.get(id=position_id)
-
+        print(election_id)
+        print(academic_year_id)
         # Build the base query for election position
         election_position_query = position.electionposition_set.all()
-        
+        for positioned in election_position_query:
+            print(positioned.position.name)
+            print(positioned.election.academic_year)
         # Filter by election_id if provided
-        if election_id:
-            election_position_query = election_position_query.filter(election_id=election_id)
-        
-        # Filter by academic_year_id if provided
-        # if academic_year_id:
-        #     election_position_query = election_position_query.filter(
-        #     electionposition__election__academic_year_id=academic_year_id
-        # ).distinct()
-        
-        election_position = election_position_query.first()
-        
-        if not election_position:
-            return None
-
-        # Fetch candidates
-        candidates = election_position.candidate_set.all()
         if academic_year_id:
-            candidates = candidates.filter(election_position__election__academic_year__id = academic_year_id)
+            election_position_query = election_position_query.filter(election__academic_year__id=academic_year_id)
+        if election_id:
+            election_position_query = election_position_query.filter(election__id=election_id)
+        election_position = election_position_query.first()
 
+        if not election_position:
+            print("there is no specified data now")
+            return None
+        print(election_position)
+        candidates = Candidate.objects.filter(election_position=election_position)
+
+        for candidate in candidates:
+            print("&&&&&&&&&&&&")
         # Define time range
         now = datetime.datetime.now()
         if election_position.election.status == 'ACTIVE':
@@ -632,7 +633,8 @@ class PositionQuery(graphene.ObjectType):
             
             promises = Promise.objects.filter(
                 candidate=candidate
-            ).prefetch_related('promiseupdate_set')
+            )
+            # .prefetch_related('promiseupdate_set')
 
         return CandidateDetails(
             candidate=candidate,
@@ -645,3 +647,7 @@ class PositionQuery(graphene.ObjectType):
             ratings=ratings,
             promises=promises
         )
+    all_elections = graphene.List(ElectionType)
+
+    def resolve_all_elections(root, info):
+        return Election.objects.all().order_by('-start_datetime')

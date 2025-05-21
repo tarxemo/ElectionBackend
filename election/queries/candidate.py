@@ -97,7 +97,7 @@ class CandidateQuery(graphene.ObjectType):
             
             promises = Promise.objects.filter(
                 candidate=candidate
-            ).prefetch_related('promiseupdate_set')
+            )
 
         return CandidateDetails(
             candidate=candidate,

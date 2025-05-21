@@ -42,8 +42,8 @@ class Command(BaseCommand):
         # 6. Create Elections
         elections = self.create_elections(positions)
         
-        # 7. Create Candidates
-        candidates = self.create_candidates(students, positions, elections)
+        # 7. Create Candidates (fixed to have exactly 5 per position per election)
+        candidates = self.create_candidates(students, elections)
         
         # 8. Simulate Voting
         votes = self.simulate_voting(students, candidates, elections)
@@ -51,7 +51,7 @@ class Command(BaseCommand):
         # 9. Calculate Election Results
         self.calculate_election_results(elections, candidates)
         
-        # 10. Create Leaders
+        # 10. Create Leaders (fixed to have leaders for all positions in all years)
         leaders = self.create_leaders(candidates)
         
         # 11. Create Promises
@@ -223,9 +223,10 @@ class Command(BaseCommand):
             try:
                 with open(csv_file, 'r') as f:
                     reader = csv.DictReader(f)
+                    students_count = 0
                     for i, row in enumerate(reader):
-                        # if i >= max_students:
-                        #     break
+                        if students_count >= max_students:
+                            break
                         
                         full_name = row.get('EmployeeName', '').strip()
                         if not full_name:
@@ -249,32 +250,64 @@ class Command(BaseCommand):
                                 'password': 'password123'  # In real app, use set_password()
                             }
                         )
-                        if created:
-                            continue
+                        
                         # Assign to random college and hostel under that college
                         college = random.choice(colleges)
                         possible_hostels = Institution.objects.filter(level__level='HOSTEL', parent=college)
                         hostel = random.choice(list(possible_hostels)) if possible_hostels.exists() else None
                         try:
                             student, created = Student.objects.get_or_create(
-                                    user=user,
-                                    institution=hostel,
-                                    academic_year=academic_year,
-                                    is_candidate=random.choice([True, False])  # Some will be candidates later
-                                )
+                                user=user,
+                                institution=hostel,
+                                academic_year=academic_year,
+                                is_candidate=random.choice([True, False])  # Some will be candidates later
+                            )
+                            students_count+=1
+                            students.append(student)
                         except:
                             continue
-                        students.append(student)
                         
                         if len(students) % 100 == 0:
                             self.stdout.write(f"  Created {len(students)} students...")
                 
                 self.stdout.write(self.style.SUCCESS(f"  Created {len(students)} students from CSV"))
-                students = Student.objects.all()
                 return students
             except FileNotFoundError:
                 self.stdout.write(self.style.ERROR(f"CSV file not found at {csv_file}, falling back to generated names"))
         
+        # Fallback to generated names if CSV not provided or not found
+        for i in range(max_students):
+            first_name = f"Student{i}"
+            last_name = f"User{i}"
+            username = f"student{i}"
+            email = f"{username}@example.com"
+            
+            user, created = User.objects.get_or_create(
+                username=username,
+                defaults={
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'email': email,
+                    'password': 'password123'
+                }
+            )
+            
+            # Assign to random college and hostel under that college
+            college = random.choice(colleges)
+            possible_hostels = Institution.objects.filter(level__level='HOSTEL', parent=college)
+            hostel = random.choice(list(possible_hostels)) if possible_hostels.exists() else None
+            
+            student = Student.objects.create(
+                user=user,
+                institution=hostel,
+                academic_year=academic_year,
+                is_candidate=random.choice([True, False])
+            )
+            students.append(student)
+        
+        self.stdout.write(self.style.SUCCESS(f"  Created {len(students)} students with generated names"))
+        return students
+    
     def create_elections(self, positions):
         self.stdout.write("Creating elections...")
         
@@ -282,70 +315,66 @@ class Command(BaseCommand):
         academic_years = AcademicYear.objects.all()
         
         for year in academic_years:
-            # Create election for each year
-            election_name = f"{year.name} General Election"
-            
-            # Random dates within the academic year
-            start_date = year.start_date + timedelta(days=random.randint(30, 100))
-            end_date = start_date + timedelta(days=random.randint(3, 7))  # Elections last 3-7 days
-            import datetime
-            from django.utils import timezone
+            # Create elections for each level in each year
+            for level in InstitutionLevel.objects.all():
+                election_name = f"{year.name} {level.get_level_display()} Election"
+                
+                # Random dates within the academic year
+                start_date = year.start_date + timedelta(days=random.randint(30, 100))
+                end_date = start_date + timedelta(days=random.randint(3, 7))  # Elections last 3-7 days
+                
+                start_datetime = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.get_current_timezone())
+                end_datetime = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.get_current_timezone())
 
-            start_datetime = datetime.datetime.combine(start_date, datetime.time.min, tzinfo=timezone.get_current_timezone())
-            end_datetime = datetime.datetime.combine(end_date, datetime.time.max, tzinfo=timezone.get_current_timezone())
-
-            election = Election.objects.create(
-                name=election_name,
-                description=f"General election for academic year {year.name}",
-                start_datetime=start_datetime,
-                end_datetime=end_datetime,
-                academic_year=year,
-                level=random.choice(InstitutionLevel.objects.all()),
-                status=(
-                    'COMPLETED' if timezone.now() > end_datetime
-                    else 'ACTIVE' if start_datetime <= timezone.now() <= end_datetime
-                    else 'UPCOMING'
-                )
-            )
-            
-            # Add positions to election
-            for position in positions:
-                # Only add positions that match the election's level
-                if position.level == election.level:
-                    ElectionPosition.objects.create(
-                        election=election,
-                        position=position,
-                        max_candidates=5
+                election = Election.objects.create(
+                    name=election_name,
+                    description=f"{level.get_level_display()} election for academic year {year.name}",
+                    start_datetime=start_datetime,
+                    end_datetime=end_datetime,
+                    academic_year=year,
+                    level=level,
+                    status=(
+                        'COMPLETED' if timezone.now() > end_datetime
+                        else 'ACTIVE' if start_datetime <= timezone.now() <= end_datetime
+                        else 'UPCOMING'
                     )
-            
-            elections.append(election)
-            self.stdout.write(self.style.SUCCESS(f"  Created election: {election_name}"))
+                )
+                
+                # Add positions to election that match the level
+                for position in positions:
+                    if position.level == level:
+                        ElectionPosition.objects.create(
+                            election=election,
+                            position=position,
+                            max_candidates=5
+                        )
+                
+                elections.append(election)
+                self.stdout.write(self.style.SUCCESS(f"  Created election: {election_name}"))
         
         return elections
     
-    def create_candidates(self, students, positions, elections):
+    def create_candidates(self, students, elections):
         self.stdout.write("Creating candidates...")
         
         candidates = []
         
         for election in elections:
-            for election_position in ElectionPosition.objects.all():
+            for election_position in election.electionposition_set.all():
                 position = election_position.position
                 institution = position.institution
+                
                 # Get eligible students (those belonging to the institution)
                 if position.level.level == 'HOSTEL':
                     eligible_students = [s for s in students if s.institution == institution]
                 elif position.level.level == 'COLLEGE':
                     eligible_students = [s for s in students if s.institution.parent == institution]
                 else:  # UNIVERSITY
-                    eligible_students = students  # All students can vote for president
+                    eligible_students = list(students)  # All students can vote for president
                 
-                # Select 5 random candidates (or less if not enough students)
-                try:
-                    num_candidates = min(5, len(eligible_students))
-                    candidate_students = random.sample(eligible_students, num_candidates) if eligible_students else []
-                except:
-                    continue
+                # Select exactly 5 candidates (or less if not enough students)
+                num_candidates = min(5, len(eligible_students))
+                candidate_students = random.sample(eligible_students, num_candidates) if eligible_students else []
                 
                 for student in candidate_students:
                     # Mark student as candidate
@@ -358,10 +387,9 @@ class Command(BaseCommand):
                             manifesto=f"My manifesto for {position.name} position",
                             is_approved=True
                         )
+                        candidates.append(candidate)
                     except:
                         continue
-                    candidates.append(candidate)
-            
             self.stdout.write(self.style.SUCCESS(f"  Created candidates for election: {election.name}"))
         
         return candidates
@@ -411,14 +439,16 @@ class Command(BaseCommand):
                                     int((election.end_datetime - election.start_datetime).total_seconds())
                                 )
                             )
-                            
-                            vote = Vote.objects.create(
-                                election=election,
-                                candidate=candidate,
-                                voter=student,
-                                timestamp=vote_time
-                            )
-                            votes.append(vote)
+                            try:
+                                vote = Vote.objects.create(
+                                    election=election,
+                                    candidate=candidate,
+                                    voter=student,
+                                    timestamp=vote_time
+                                )
+                                votes.append(vote)
+                            except:
+                                continue
             
             self.stdout.write(self.style.SUCCESS(f"  Simulated votes for election: {election.name}"))
         
@@ -475,8 +505,9 @@ class Command(BaseCommand):
         
         for candidate in winning_candidates:
             position = candidate.election_position.position
-            start_date = candidate.election_position.election.end_datetime.date()
-            end_date = start_date + timedelta(days=365)  # 1 year term
+            election = candidate.election_position.election
+            start_date = election.end_datetime.date()
+            end_date = election.academic_year.end_date
             
             leader = Leader.objects.create(
                 candidate=candidate,
@@ -573,15 +604,15 @@ class Command(BaseCommand):
         for leader in leaders:
             # Get students in the same institution
             if leader.position.level.level == 'HOSTEL':
-                eligible_students = Student.objects.filter(institution=leader.institution)
+                eligible_students = [s for s in students if s.institution == leader.institution]
             elif leader.position.level.level == 'COLLEGE':
-                eligible_students = Student.objects.filter(institution=leader.institution.parent)
+                eligible_students = [s for s in students if s.institution.parent == leader.institution]
             else:  # UNIVERSITY
-                eligible_students = Student.objects.all()
+                eligible_students = students  # All students can rate university president
             
             # Only some students will rate (30-60%)
             num_raters = int(len(eligible_students) * random.uniform(0.3, 0.6))
-            raters = random.sample(list(eligible_students), num_raters) if eligible_students.exists() else []
+            raters = random.sample(eligible_students, num_raters) if eligible_students else []
             
             for student in raters:
                 # Random rating with some bias toward middle values
@@ -591,21 +622,23 @@ class Command(BaseCommand):
                 rating_date = leader.start_date + timedelta(
                     days=random.randint(0, (leader.end_date - leader.start_date).days)
                 )
-                
-                rating = Rating.objects.create(
-                    leader=leader,
-                    student=student,
-                    score=rating_value,
-                    comment=random.choice([
-                        "Good job!",
-                        "Could be better",
-                        "Satisfactory performance",
-                        "Needs improvement",
-                        "Excellent leadership",
-                        None, None, None  # Higher chance of no comment
-                    ]),
-                    timestamp=rating_date
-                )
+                try:
+                    rating = Rating.objects.create(
+                        leader=leader,
+                        student=student,
+                        score=rating_value,
+                        comment=random.choice([
+                            "Good job!",
+                            "Could be better",
+                            "Satisfactory performance",
+                            "Needs improvement",
+                            "Excellent leadership",
+                            None, None, None  # Higher chance of no comment
+                        ]),
+                        timestamp=rating_date
+                    )
+                except:
+                    continue
                 ratings.append(rating)
         
         self.stdout.write(self.style.SUCCESS(f"  Created {len(ratings)} ratings"))

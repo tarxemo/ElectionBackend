@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from election.models import (
-    Election, Institution, Position, Student, 
+    AcademicYear, Election, Institution, Position, Student, 
     ElectionPosition, Candidate, Vote
 )
 
