@@ -1,398 +1,383 @@
 import random
 from datetime import datetime, timedelta
 from django.core.management.base import BaseCommand
-from django.utils import timezone
-from election.models import (
-    AcademicYear, Election, Institution, Position, Student, 
-    ElectionPosition, Candidate, Vote
+# from django.utils import datetime
+from django.contrib.auth.models import User
+from django.db import transaction
+from faker import Faker
+from ...models import (
+    AcademicYear, InstitutionLevel, Institution, Position, Student,
+    Election, ElectionPosition, Candidate, Vote, ElectionResult,
+    ElectionStatistics
 )
+from django.db.models import Count
+
+fake = Faker()
 
 class Command(BaseCommand):
-    help = "Simulates real-time election voting with customizable parameters"
+    help = 'Simulates an election with historical data and real-time voting'
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '--election_name', 
-            type=str, 
-            required=True,
-            help='Name of the election to create or simulate'
+            '--election-id',
+            type=int,
+            help='ID of the election to simulate (will create one if not provided)',
         )
         parser.add_argument(
-            '--days', 
-            type=int, 
+            '--speed',
+            type=float,
+            default=1.0,
+            help='Speed multiplier for real-time simulation (1.0 = real time)',
+        )
+        parser.add_argument(
+            '--days',
+            type=int,
             default=7,
-            help='Duration of election in days (1-10)'
+            help='Total duration of election in days',
         )
         parser.add_argument(
-            '--voter_turnout', 
-            type=float, 
-            default=0.7,
-            help='Expected voter turnout ratio (0.1 to 1.0)'
-        )
-        parser.add_argument(
-            '--daily_variation', 
-            type=float, 
-            default=0.2,
-            help='Daily voting pattern variation (0.1 to 0.5)'
-        )
-        parser.add_argument(
-            '--peak_day', 
-            type=int, 
-            default=None,
-            help='Specific day when voting peaks (1 to days)'
-        )
-        parser.add_argument(
-            '--force_new', 
-            action='store_true',
-            help='Force creation of new election even if name exists'
+            '--voters',
+            type=int,
+            default=100,
+            help='Approximate number of voters to simulate',
         )
 
-    def handle(self, *args, **kwargs):
-        election_name = kwargs['election_name']
-        duration_days = min(max(kwargs['days'], 1), 10)  # Clamp between 1-10 days
-        voter_turnout = min(max(kwargs['voter_turnout'], 0.1), 1.0)
-        daily_variation = min(max(kwargs['daily_variation'], 0.1), 0.5)
-        peak_day = kwargs['peak_day']
-        force_new = kwargs['force_new']
-
-        # 1. Setup or get existing election
-        election = self.setup_election(election_name, duration_days, force_new)
-        if not election:
-            return
-
-        # 2. Determine current election day (if in progress)
-        current_day = self.get_current_election_day(election, duration_days)
-
-        # 3. Get or create positions and candidates
-        positions = self.get_or_create_positions(election)
-        candidates = self.get_or_create_candidates(election, positions)
-
-        # 4. Simulate voting for current day
-        self.simulate_voting(
-            election, 
-            candidates, 
-            current_day,
-            duration_days,
-            voter_turnout,
-            daily_variation,
-            peak_day
-        )
-
-        self.stdout.write(self.style.SUCCESS(
-            f"Successfully simulated voting for day {current_day} of {election.name}"
-        ))
-
-    def setup_election(self, name, duration_days, force_new):
-        """Create new election or get existing one"""
-        if not force_new:
+    def handle(self, *args, **options):
+        self.election_id = options['election_id']
+        self.speed = options['speed']
+        self.total_days = options['days']
+        self.target_voters = options['voters']
+        
+        # Calculate time parameters
+        self.now = datetime.now()
+        self.election_end = self.now + timedelta(days=self.total_days)
+        
+        if self.election_id:
             try:
-                election = Election.objects.get(name=name)
-                self.stdout.write(self.style.SUCCESS(
-                    f"Found existing election: {name} (ID: {election.id})"
-                ))
-                return election
+                self.election = Election.objects.get(pk=self.election_id)
+                self.stdout.write(self.style.SUCCESS(f'Using existing election: {self.election}'))
             except Election.DoesNotExist:
-                pass
-
-        # Create new election
-        start_date = timezone.now().replace(
-            hour=8, minute=0, second=0, microsecond=0
-        )
-        end_date = start_date + timedelta(days=duration_days)
-
-        election = Election.objects.create(
-            name=name,
-            description=f"Simulated election running for {duration_days} days",
-            start_datetime=start_date,
-            end_datetime=end_date,
-            status='ACTIVE' if start_date <= timezone.now() <= end_date else (
-                'COMPLETED' if timezone.now() > end_date else 'UPCOMING'
-            ),
-            academic_year=AcademicYear.objects.filter(is_current=True).first()
-        )
-
-        self.stdout.write(self.style.SUCCESS(
-            f"Created new election: {name} running from {start_date} to {end_date}"
-        ))
-        return election
-
-    def get_current_election_day(self, election, duration_days):
-        """Determine which day of the election we're simulating"""
-        if timezone.now() < election.start_datetime:
-            return 1  # First day if not started yet
+                self.stdout.write(self.style.ERROR(f'Election with ID {self.election_id} not found'))
+                return
+        else:
+            self.create_election()
         
-        if timezone.now() > election.end_datetime:
-            return duration_days  # Last day if already ended
-
-        elapsed = timezone.now() - election.start_datetime
-        current_day = min(elapsed.days + 1, duration_days)
+        # Simulate historical data (first 5 days)
+        if self.election.start_datetime < self.now:
+            self.simulate_historical_voting()
         
-        # Add some randomness to simulate different times of day
-        if random.random() < 0.3:
-            current_day = min(current_day + 1, duration_days)
-        elif random.random() < 0.2:
-            current_day = max(current_day - 1, 1)
-            
-        return current_day
+        # Start real-time simulation if election is still active
+        if self.election.status == 'ACTIVE':
+            self.stdout.write(self.style.SUCCESS('Starting real-time voting simulation...'))
+            self.simulate_realtime_voting()
+        else:
+            self.stdout.write(self.style.WARNING('Election is not active - no real-time simulation'))
 
-    def get_or_create_positions(self, election):
-        """Get or create positions for the election"""
+    def create_election(self):
+        """Create a new election if one wasn't provided"""
+        self.stdout.write('Creating new election...')
+        
+        # Get or create required models
+        academic_year, _ = AcademicYear.objects.get_or_create(
+            name=f"{self.now.year}-{self.now.year+1}",
+            defaults={
+                'start_date': datetime(self.now.year, 1, 1),
+                'end_date': datetime(self.now.year+1, 12, 31),
+                'is_current': True
+            }
+        )
+        
+        # Create university level and institution
+        university_level, _ = InstitutionLevel.objects.get_or_create(
+            level='UNIVERSITY',
+            defaults={'level': 'UNIVERSITY'}
+        )
+        
+        university, _ = Institution.objects.get_or_create(
+            name="Example University",
+            level=university_level,
+            defaults={'description': "Main university institution"}
+        )
+        
+        # Create some positions
         positions = []
+        for title in ["President", "Vice President", "Secretary"]:
+            pos, _ = Position.objects.get_or_create(
+                name=title,
+                level=university_level,
+                institution=university,
+                defaults={'voting_power': 1}
+            )
+            positions.append(pos)
         
-        # University level positions
-        university = Institution.objects.filter(level__level='UNIVERSITY').first()
-        if university:
-            positions.append(self.get_or_create_position(
-                election, university, "President"
-            ))
-        
-        # College level positions
-        colleges = Institution.objects.filter(level__level='COLLEGE')
-        for college in colleges:
-            positions.append(self.get_or_create_position(
-                election, college, "Governor"
-            ))
-        
-        # Hostel level positions
-        hostels = Institution.objects.filter(level__level='HOSTEL')
-        for hostel in hostels:
-            positions.append(self.get_or_create_position(
-                election, hostel, "Clerk"
-            ))
-        
-        return positions
-
-    def get_or_create_position(self, election, institution, title):
-        """Get or create a specific position"""
-        position, created = Position.objects.get_or_create(
-            name=f"{title} - {institution.name}",
-            institution=institution,
-            level=institution.level,
-            defaults={'description': f"{title} position for {institution.name}"}
+        # Create the election
+        self.election = Election.objects.create(
+            name="Annual Student Election",
+            description="Simulated election for demonstration purposes",
+            status='ACTIVE',
+            start_datetime=self.now - timedelta(days=5),
+            end_datetime=self.now + timedelta(days=2),  # 7 day total duration
+            academic_year=academic_year,
+            level=university_level,
+            institution=university
         )
         
-        # Create election position if needed
-        ElectionPosition.objects.get_or_create(
-            election=election,
-            position=position,
-            defaults={'max_candidates': 5}
-        )
-        
-        return position
-
-    def get_or_create_candidates(self, election, positions):
-        """Get or create candidates for each position"""
-        candidates = []
-        
+        # Add positions to election
         for position in positions:
-            # Get existing candidates for this position
-            existing_candidates = Candidate.objects.filter(
-                election_position__election=election,
-                election_position__position=position
+            ElectionPosition.objects.create(
+                election=self.election,
+                position=position,
+                max_candidates=3
+            )
+        
+        # Create candidates
+        self.create_candidates()
+        
+        self.stdout.write(self.style.SUCCESS(f'Created new election: {self.election}'))
+
+    def create_candidates(self):
+        """Create candidate students for the election"""
+        # Get all election positions
+        election_positions = ElectionPosition.objects.filter(election=self.election)
+        
+        # Create some fake students
+        for i in range(10):
+            user, created = User.objects.get_or_create(
+                username=f'student{i}',
+                first_name=fake.first_name(),
+                last_name=fake.last_name(),
+                email=f'student{i}@example.com',
+                password='password'
             )
             
-            if existing_candidates.exists():
-                candidates.extend(existing_candidates)
-                continue
-                
-            # Create new candidates if none exist
-            institution = position.institution
-            eligible_students = self.get_eligible_students(institution)
+            student, created = Student.objects.get_or_create(
+                user=user,
+                institution=self.election.institution,
+                academic_year=self.election.academic_year,
+                is_active=True
+            )
             
-            # Select 3-5 candidates (with some randomness)
-            num_candidates = random.randint(3, min(5, len(eligible_students)))
-            selected_students = random.sample(eligible_students, num_candidates)
-            
-            for student in selected_students:
-                election_position = ElectionPosition.objects.get(
-                    election=election,
-                    position=position
-                )
-                
-                candidate = Candidate.objects.create(
-                    student=student,
-                    election_position=election_position,
-                    manifesto=f"My plan as {position.name}",
-                    is_approved=True
-                )
-                candidates.append(candidate)
-                student.is_candidate = True
-                student.save()
-        
-        return candidates
+            # Make some students candidates
+            if i < 6:  # First 6 students are candidates
+                for position in random.sample(
+                    list(election_positions), 
+                    random.randint(1, min(2, len(election_positions)))
+                ):
+                    Candidate.objects.create(
+                        student=student,
+                        election_position=position,
+                        manifesto=fake.paragraph(),
+                        is_approved=True,
+                        approved_at=datetime.now() - timedelta(days=1)
+                    )
 
-    def get_eligible_students(self, institution):
-        """Get students eligible to run for a position"""
-        if institution.level.level == 'UNIVERSITY':
-            return list(Student.objects.filter(
-                institution__level__level='HOSTEL'
-            ).order_by('?')[:100])  # Limit to 100 random students for performance
+    def simulate_historical_voting(self):
+        """Simulate voting data for the first 5 days"""
+        self.stdout.write('Simulating historical voting data...')
         
-        elif institution.level.level == 'COLLEGE':
-            return list(Student.objects.filter(
-                institution__parent=institution
-            ).order_by('?')[:50])
-        
-        else:  # HOSTEL
-            return list(Student.objects.filter(
-                institution=institution
-            ).order_by('?')[:20])
-
-    def simulate_voting(self, election, candidates, current_day, 
-                      total_days, turnout, daily_variation, peak_day):
-        """Simulate realistic voting patterns"""
-        self.stdout.write(f"Simulating voting for day {current_day}...")
-        
-        # Calculate daily voting distribution
-        daily_distribution = self.calculate_daily_distribution(
-            total_days, 
-            daily_variation, 
-            peak_day
+        # Get all eligible voters and candidates
+        voters = Student.objects.filter(
+            institution=self.election.institution,
+            academic_year=self.election.academic_year,
+            is_active=True
         )
         
-        # Get all eligible voters
-        voters = self.get_eligible_voters(election)
-        total_voters = len(voters)
-        votes_to_cast = int(total_voters * turnout * daily_distribution[current_day-1])
+        candidates = Candidate.objects.filter(
+            election_position__election=self.election,
+            is_approved=True
+        ).select_related('election_position')
         
-        self.stdout.write(f"Simulating {votes_to_cast} votes for day {current_day}")
+        if not candidates.exists():
+            self.stdout.write(self.style.ERROR('No approved candidates found for this election'))
+            return
         
-        # Group candidates by position for efficient voting
-        candidates_by_position = {}
-        for candidate in candidates:
-            pos_id = candidate.election_position.position.id
-            if pos_id not in candidates_by_position:
-                candidates_by_position[pos_id] = []
-            candidates_by_position[pos_id].append(candidate)
+        # Calculate voting parameters
+        total_voters = min(self.target_voters, voters.count())
+        days_passed = (self.now - self.election.start_datetime).days
+        votes_per_day = total_voters // self.total_days
         
-        # Simulate votes
-        votes_created = 0
-        vote_objects = []
+        self.stdout.write(f'Simulating {days_passed} days of voting ({votes_per_day * days_passed} votes)...')
         
-        for _ in range(votes_to_cast):
-            voter = random.choice(voters)
+        # Simulate voting for each historical day
+        for day in range(days_passed):
+            day_date = self.election.start_datetime + timedelta(days=day)
             
-            # Voter can vote for each position they're eligible for
-            for pos_id, pos_candidates in candidates_by_position.items():
-                position = pos_candidates[0].election_position.position
+            # Simulate daily voting pattern (more active during certain hours)
+            for hour in range(8, 20):  # 8am to 8pm
+                hour_votes = random.randint(0, votes_per_day // 12)
                 
-                # Check voter eligibility for this position
-                if not self.is_voter_eligible(voter, position):
-                    continue
-                
-                # Simulate some voters skipping certain positions
-                if random.random() < 0.1:  # 10% chance to skip
-                    continue
-                
-                # Weight candidates based on some factors (simulating popularity)
-                weights = self.calculate_candidate_weights(pos_candidates)
-                candidate = random.choices(pos_candidates, weights=weights)[0]
-                
-                # Create vote with realistic timestamp during the day
-                vote_time = self.generate_vote_timestamp(election, current_day)
-                
-                vote_objects.append(Vote(
-                    election=election,
-                    candidate=candidate,
-                    voter=voter,
-                    timestamp=vote_time
-                ))
-                
-                votes_created += 1
-                
-                # Bulk create in batches for performance
-                if len(vote_objects) >= 1000:
-                    Vote.objects.bulk_create(vote_objects)
-                    vote_objects = []
+                for _ in range(hour_votes):
+                    # Select a random voter who hasn't voted yet today
+                    voter = random.choice(voters)
+                    
+                    # Get all positions they can vote for
+                    positions = ElectionPosition.objects.filter(
+                        election=self.election,
+                        position__institution__in=self.get_voting_institutions(voter)
+                    )
+                    
+                    # Create votes for each position
+                    for position in positions:
+                        position_candidates = [
+                            c for c in candidates 
+                            if c.election_position == position
+                        ]
+                        
+                        if position_candidates:
+                            candidate = random.choice(position_candidates)
+                            vote_time = day_date + timedelta(
+                                hours=hour,
+                                minutes=random.randint(0, 59),
+                                seconds=random.randint(0, 59)
+                            )
+                            
+                            Vote.objects.create(
+                                election=self.election,
+                                candidate=candidate,
+                                voter=voter,
+                                timestamp=vote_time,
+                                weight=1
+                            )
         
-        # Create remaining votes
-        if vote_objects:
-            Vote.objects.bulk_create(vote_objects)
+        self.stdout.write(self.style.SUCCESS('Historical voting simulation complete'))
+
+    def get_voting_institutions(self, student):
+        """Get all institutions a student can vote in (including parents)"""
+        institutions = [student.institution]
+        current = student.institution
         
-        self.stdout.write(self.style.SUCCESS(
-            f"Created {votes_created} votes for day {current_day}"
+        # Walk up the parent hierarchy
+        while current.parent:
+            institutions.append(current.parent)
+            current = current.parent
+        
+        return institutions
+
+    def simulate_realtime_voting(self):
+        """Simulate real-time voting until election ends"""
+        from time import sleep
+        
+        # Get all eligible voters and candidates
+        voters = list(Student.objects.filter(
+            institution=self.election.institution,
+            academic_year=self.election.academic_year,
+            is_active=True
         ))
-
-    def calculate_daily_distribution(self, total_days, variation, peak_day=None):
-        """Calculate realistic daily voting distribution"""
-        if not peak_day:
-            peak_day = random.randint(2, total_days-1) if total_days > 2 else 1
         
-        # Base distribution (normal distribution around peak day)
-        days = list(range(1, total_days+1))
-        distribution = [
-            self.normal_pdf(day, peak_day, variation*2) 
-            for day in days
-        ]
+        candidates = list(Candidate.objects.filter(
+            election_position__election=self.election,
+            is_approved=True
+        ).select_related('election_position'))
         
-        # Normalize to sum to 1
-        total = sum(distribution)
-        return [x/total for x in distribution]
-
-    def normal_pdf(self, x, mean, stddev):
-        """Normal distribution probability density function"""
-        return (1.0 / (stddev * ((2 * 3.1415926535) ** 0.5))) * \
-               (2.7182818284 ** (-((x - mean) ** 2) / (2 * stddev ** 2)))
-
-    def get_eligible_voters(self, election):
-        """Get all students eligible to vote in this election"""
-        return list(Student.objects.filter(
-            academic_year=election.academic_year
-        ).order_by('?')[:10000])  # Limit for performance
-
-    def is_voter_eligible(self, voter, position):
-        """Check if voter is eligible to vote for a position"""
-        if position.level.level == 'UNIVERSITY':
-            return True
-        elif position.level.level == 'COLLEGE':
-            return voter.institution.parent == position.institution
-        else:  # HOSTEL
-            return voter.institution == position.institution
-
-    def calculate_candidate_weights(self, candidates):
-        """Calculate weights for candidates (simulating popularity)"""
-        weights = []
-        base_popularity = {
-            'incumbent': 1.5,
-            'active': 1.2,
-            'new': 1.0
-        }
-        
-        for candidate in candidates:
-            # Existing candidates get popularity boost from previous votes
-            existing_votes = Vote.objects.filter(candidate=candidate).count()
-            
-            if existing_votes > 10:
-                weight = base_popularity['incumbent'] * (1 + existing_votes/100)
-            elif existing_votes > 0:
-                weight = base_popularity['active'] * (1 + existing_votes/50)
-            else:
-                weight = base_popularity['new'] * random.uniform(0.8, 1.2)
-            
-            weights.append(weight)
-        
-        return weights
-
-    def generate_vote_timestamp(self, election, current_day):
-        """Generate realistic vote timestamp within the specified day"""
-        day_start = election.start_datetime + timedelta(days=current_day-1)
-        day_end = day_start + timedelta(days=1)
-        
-        # Voting hours (8am to 6pm)
-        voting_start = day_start.replace(hour=8, minute=0, second=0)
-        voting_end = day_start.replace(hour=18, minute=0, second=0)
-        
-        # Generate random time during voting hours with peak around midday
-        seconds_in_day = (voting_end - voting_start).total_seconds()
-        peak_time = voting_start + timedelta(hours=5)  # 1pm peak
-        
-        # Normal distribution around peak time (sigma = 2 hours)
-        vote_time = peak_time + timedelta(
-            seconds=random.gauss(0, 2*3600)
+        # Get voters who haven't voted yet
+        voters_who_voted = set(
+            Vote.objects.filter(election=self.election)
+            .values_list('voter_id', flat=True)
+            .distinct()
         )
         
-        # Clamp to voting hours
-        vote_time = max(vote_time, voting_start)
-        vote_time = min(vote_time, voting_end)
+        remaining_voters = [v for v in voters if v.id not in voters_who_voted]
+        total_remaining = len(remaining_voters)
         
-        return vote_time
+        self.stdout.write(f'Starting real-time simulation with {total_remaining} remaining voters...')
+        
+        try:
+            while datetime.now() < self.election.end_datetime and remaining_voters:
+                # Calculate time until next vote (inversely proportional to remaining time)
+                time_left = (self.election.end_datetime - datetime.now()).total_seconds()
+                avg_wait = (time_left / max(1, len(remaining_voters))) / self.speed
+                
+                # Randomize wait time around the average
+                wait_time = max(0, random.normalvariate(avg_wait, avg_wait/2))
+                sleep(wait_time)
+                
+                # Select a random voter and create their votes
+                voter = random.choice(remaining_voters)
+                remaining_voters.remove(voter)
+                
+                positions = ElectionPosition.objects.filter(
+                    election=self.election,
+                    position__institution__in=self.get_voting_institutions(voter)
+                )
+                
+                # Create votes for each position
+                for position in positions:
+                    position_candidates = [
+                        c for c in candidates 
+                        if c.election_position_id == position.id
+                    ]
+                    
+                    if position_candidates:
+                        candidate = random.choice(position_candidates)
+                        Vote.objects.create(
+                            election=self.election,
+                            candidate=candidate,
+                            voter=voter,
+                            timestamp=datetime.now(),
+                            weight=1
+                        )
+                
+                # Update election statistics periodically
+                if random.random() < 0.1:  # 10% chance to update stats
+                    self.update_election_statistics()
+                
+                self.stdout.write(f'Vote recorded for {voter.user.get_full_name()} ({len(remaining_voters)} remaining)')
+        
+        except KeyboardInterrupt:
+            self.stdout.write(self.style.WARNING('Simulation interrupted by user'))
+        
+        # Final statistics update
+        self.update_election_statistics()
+        self.stdout.write(self.style.SUCCESS('Election simulation complete'))
+
+    def update_election_statistics(self):
+        """Calculate and update election statistics"""
+        with transaction.atomic():
+            # Calculate total voters and votes
+            total_voters = Student.objects.filter(
+                institution=self.election.institution,
+                academic_year=self.election.academic_year,
+                is_active=True
+            ).count()
+            
+            total_votes = Vote.objects.filter(election=self.election).count()
+            
+            # Calculate voter turnout
+            turnout = (total_votes / total_voters * 100) if total_voters > 0 else 0
+            
+            # Get leading candidate
+            results = Vote.objects.filter(election=self.election)\
+                .values('candidate')\
+                .annotate(vote_count=Count('id'))\
+                .order_by('-vote_count')
+            
+            leading_candidate = None
+            if results:
+                leading_candidate_id = results[0]['candidate']
+                leading_candidate = Candidate.objects.get(pk=leading_candidate_id)
+            
+            # Update or create statistics
+            ElectionStatistics.objects.update_or_create(
+                election=self.election,
+                defaults={
+                    'total_voters': total_voters,
+                    'total_votes_cast': total_votes,
+                    'voter_turnout': turnout,
+                    'leading_candidate': leading_candidate
+                }
+            )
+            
+            # Update election results for each candidate
+            for candidate in Candidate.objects.filter(election_position__election=self.election):
+                total_votes = Vote.objects.filter(candidate=candidate).count()
+                percentage = (total_votes / total_votes * 100) if total_votes > 0 else 0
+                
+                ElectionResult.objects.update_or_create(
+                    election=self.election,
+                    candidate=candidate,
+                    defaults={
+                        'total_votes': total_votes,
+                        'percentage': percentage,
+                        'is_winner': False  # Will be set after election ends
+                    }
+                )

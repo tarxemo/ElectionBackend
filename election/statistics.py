@@ -16,10 +16,6 @@ class VoteType(DjangoObjectType):
         model = Vote
 
 
-class ElectionType(DjangoObjectType):
-    class Meta:
-        model = Election
-
 class CollegeType(DjangoObjectType):
     class Meta:
         model = College

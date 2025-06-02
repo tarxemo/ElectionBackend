@@ -22,10 +22,10 @@ class ElectionTrendType(graphene.ObjectType):
     voters = graphene.Int()
     turnout = graphene.Float()
 
-class InstitutionType(DjangoObjectType):
-    class Meta:
-        model = Institution
-        fields = "__all__"
+# class InstitutionType(DjangoObjectType):
+#     class Meta:
+#         model = Institution
+#         fields = "__all__"
 
 class AcademicYearType(DjangoObjectType):
     class Meta:

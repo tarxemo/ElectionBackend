@@ -1,7 +1,8 @@
 # schema.py
 import graphene
 from graphene_django import DjangoObjectType
-from election.models import Candidate, ElectionPosition, ElectionResult, InstitutionLevel, Leader, Position, Institution, AcademicYear, Election, Promise, PromiseUpdate, Rating, Student, Vote
+from election.types import ElectionStatisticsType, ElectionTrendType, InstitutionDetails, InstitutionType, LeaderType
+from election.models import Candidate, ElectionPosition, ElectionResult, ElectionStatistics, InstitutionLevel, Leader, Position, Institution, AcademicYear, Election, Promise, PromiseUpdate, Rating, Student, Vote
 from django.db.models import Q
 import datetime
 from django.db.models import Avg
@@ -38,37 +39,59 @@ class AcademicYearType(DjangoObjectType):
         model = AcademicYear
         fields = '__all__'
 
+        
+# schema.py
 
-class InstitutionType(DjangoObjectType):
-    class Meta:
-        model = Institution
-        fields = '__all__'
+class ElectionSummaryType(graphene.ObjectType):
+    id = graphene.ID()
+    name = graphene.String()
+    status = graphene.String()
+    start_datetime = graphene.DateTime()
+    end_datetime = graphene.DateTime()
+    academic_year = graphene.Field(AcademicYearType)
+    level = graphene.Field(InstitutionLevelType)
+    institution = graphene.Field(InstitutionType)
+    total_candidates = graphene.Int()
+    total_voters = graphene.Int()
+    total_votes_cast = graphene.Int()
+    voter_turnout = graphene.Float()
+    leading_candidate = graphene.String()
 
-    parent = graphene.Field(lambda: InstitutionType)
-    children = graphene.List(lambda: InstitutionType)
-    hierarchy = graphene.List(lambda: InstitutionType)
-    student_count = graphene.Int()
-    leader_count = graphene.Int()
+class ElectionListType(graphene.ObjectType):
+    elections = graphene.List(ElectionSummaryType)
+    status_distribution = graphene.JSONString()
+    level_distribution = graphene.JSONString()
+    yearly_turnout = graphene.JSONString()
+# class InstitutionType(DjangoObjectType):
+#     class Meta:
+#         model = Institution
+#         fields = '__all__'
+
+#     parent = graphene.Field(lambda: InstitutionType)
+#     children = graphene.List(lambda: InstitutionType)
+#     hierarchy = graphene.List(lambda: InstitutionType)
+#     student_count = graphene.Int()
+#     leader_count = graphene.Int()
     
-    def resolve_parent(self, info):
-        return self.parent
+#     def resolve_parent(self, info):
+#         return self.parent
     
-    def resolve_children(self, info):
-        return self.institution_set.all()
+#     def resolve_children(self, info):
+#         return self.institution_set.all()
     
-    def resolve_hierarchy(self, info):
-        def get_hierarchy(obj):
-            if obj.parent:
-                return get_hierarchy(obj.parent) + [obj]
-            return [obj]
-        return get_hierarchy(self)
+#     def resolve_hierarchy(self, info):
+#         def get_hierarchy(obj):
+#             if obj.parent:
+#                 return get_hierarchy(obj.parent) + [obj]
+#             return [obj]
+#         return get_hierarchy(self)
     
-    def resolve_student_count(self, info):
-        return self.student_set.count()
+#     def resolve_student_count(self, info):
+#         return self.student_set.count()
     
-    def resolve_leader_count(self, info):
-        return self.leader_set.count()
-    
+#     def resolve_leader_count(self, info):
+#         return self.leader_set.count()
+
 class PositionType(DjangoObjectType):
     class Meta:
         model = Position
@@ -253,10 +276,6 @@ class ElectionResultType(DjangoObjectType):
         model = ElectionResult
         fields = '__all__'
 
-class LeaderType(DjangoObjectType):
-    class Meta:
-        model = Leader
-        fields = '__all__'
 
 class RatingType(DjangoObjectType):
     class Meta:
@@ -383,9 +402,104 @@ def get_institutional_breakdown(candidate, election_position):
 
     
     
+class DistributionItemType(graphene.ObjectType):
+    key = graphene.String()
+    value = graphene.Int()
+    status = graphene.String()
+    count = graphene.Int()
+    level = graphene.String()
+
+class YearlyTurnoutItemType(graphene.ObjectType):
+    year = graphene.String()
+    turnout = graphene.Float()
+    election_count = graphene.Int()
+
+class ElectionListType(graphene.ObjectType):
+    elections = graphene.List(ElectionSummaryType)
+    status_distribution = graphene.List(DistributionItemType)
+    level_distribution = graphene.List(DistributionItemType)
+    yearly_turnout = graphene.List(YearlyTurnoutItemType)
     
-    
-    
+class ElectionObjectType(DjangoObjectType):
+    class Meta:
+        model = Election
+        fields = "__all__"
+
+    positions = graphene.List(ElectionPositionType)
+    statistics = graphene.Field(ElectionStatisticsType)
+    candidate_performance = graphene.JSONString()
+    time_series_data = graphene.JSONString()
+    institution_breakdown = graphene.JSONString()
+
+    def resolve_positions(self, info):
+        return self.electionposition_set.all()
+
+    def resolve_statistics(self, info):
+        return ElectionStatistics.objects.filter(election=self).first()
+
+    def resolve_candidate_performance(self, info):
+        results = ElectionResult.objects.filter(
+            election=self
+        ).select_related('candidate__student__user', 'candidate__election_position__position')
+        
+        return [{
+            'candidate_id': result.candidate.id,
+            'name': f"{result.candidate.student.user.first_name} {result.candidate.student.user.last_name}",
+            'position': result.candidate.election_position.position.name,
+            'votes': result.total_votes,
+            'percentage': float(result.percentage),
+            'rank': result.position_rank,
+            'is_winner': result.is_winner
+        } for result in results]
+
+    def resolve_time_series_data(self, info):
+        votes = Vote.objects.filter(
+            election=self
+        ).order_by('timestamp')
+        
+        if not votes.exists():
+            return None
+
+        # Create hourly buckets
+        start_time = self.start_datetime
+        end_time = self.end_datetime
+        time_delta = end_time - start_time
+        hours = int(time_delta.total_seconds() / 3600) + 1
+        
+        time_series = []
+        for i in range(hours):
+            current_hour = start_time + datetime.timedelta(hours=i)
+            next_hour = current_hour + datetime.timedelta(hours=1)
+            
+            hour_votes = votes.filter(
+                timestamp__gte=current_hour,
+                timestamp__lt=next_hour
+            ).count()
+            
+            time_series.append({
+                'hour': current_hour.strftime('%Y-%m-%d %H:00'),
+                'votes': hour_votes,
+                'cumulative_votes': votes.filter(timestamp__lt=next_hour).count()
+            })
+        
+        return time_series
+
+    def resolve_institution_breakdown(self, info):
+        votes = Vote.objects.filter(election=self)
+        institutions = Institution.objects.filter(
+            student__votes_cast__election=self
+        ).distinct().annotate(
+            vote_count=Count('student__votes_cast')
+        )
+        
+        return [{
+            'institution_id': inst.id,
+            'name': inst.name,
+            'level': inst.level.level,
+            'votes': inst.vote_count,
+            'percentage': (inst.vote_count / votes.count()) * 100 if votes.count() > 0 else 0
+        } for inst in institutions]
+
 
 class PositionQuery(graphene.ObjectType):
     all_institutions = graphene.List(InstitutionType)
@@ -469,6 +583,7 @@ class PositionQuery(graphene.ObjectType):
 
     def resolve_academic_years(self, info):
         return AcademicYear.objects.all()
+
         
 
     def resolve_position_details(self, info, position_id, election_id=None, academic_year_id=None):
@@ -651,3 +766,201 @@ class PositionQuery(graphene.ObjectType):
 
     def resolve_all_elections(root, info):
         return Election.objects.all().order_by('-start_datetime')
+
+
+    institution_details = graphene.Field(
+        InstitutionDetails,
+        institution_id=graphene.ID(required=True)
+    )
+    
+    def resolve_institution_details(root, info, institution_id):
+        try:
+            institution = Institution.objects.select_related('level', 'parent').get(id=institution_id)
+        except Institution.DoesNotExist:
+            return None
+        
+        parent = institution.parent
+        children = Institution.objects.filter(parent=institution)
+        
+        # Build hierarchy path
+        hierarchy = []
+        current = institution
+        while current:
+            hierarchy.insert(0, {
+                'id': current.id,
+                'name': current.name,
+                'level': current.level.level
+            })
+            current = current.parent
+        
+        return InstitutionDetails(
+            institution=institution,
+            parent_institution=parent,
+            child_institutions=children,
+            hierarchy=hierarchy
+        )
+
+    election_trends = graphene.List(
+        ElectionTrendType,
+        institution_id=graphene.ID(required=True)
+    )
+
+    def resolve_election_trends(self, info, institution_id):
+        # Filter elections by institution
+        elections = Election.objects.filter(institution_id=institution_id)
+
+        # Annotate year from start_datetime
+        trends = {}
+        for election in elections:
+            year = election.start_datetime.year
+            if year not in trends:
+                trends[year] = {
+                    'elections': 0,
+                    'voters': 0,
+                    'turnout_total': 0.0,
+                    'turnout_count': 0
+                }
+            trends[year]['elections'] += 1
+
+            try:
+                stats = ElectionStatistics.objects.get(election=election)
+                trends[year]['voters'] += stats.total_voters
+                trends[year]['turnout_total'] += float(stats.voter_turnout)
+                trends[year]['turnout_count'] += 1
+            except ElectionStatistics.DoesNotExist:
+                pass
+
+        # Format the results
+        result = []
+        for year, data in trends.items():
+            avg_turnout = (
+                data['turnout_total'] / data['turnout_count']
+                if data['turnout_count'] > 0 else 0.0
+            )
+            result.append(ElectionTrendType(
+                year=str(year),
+                elections=data['elections'],
+                voters=data['voters'],
+                turnout=round(avg_turnout, 2)
+            ))
+
+        # Sort by year descending
+        return sorted(result, key=lambda x: x.year, reverse=True)
+    
+
+    election_details = graphene.Field(
+        ElectionObjectType,
+        election_id=graphene.ID(required=True)
+    )
+    
+    def resolve_election_details(root, info, election_id):
+        try:
+            return Election.objects.select_related(
+                'academic_year',
+                'level',
+                'institution'
+            ).prefetch_related(
+                'electionposition_set__position',
+                'electionposition_set__candidate_set__student__user'
+            ).get(id=election_id)
+        except Election.DoesNotExist:
+            return None
+
+
+    election_list = graphene.Field(
+        ElectionListType,
+        level=graphene.String(),
+        status=graphene.String(),
+        academic_year=graphene.ID()
+    )
+
+    def resolve_election_list(root, info, level=None, status=None, academic_year=None):
+        # Base query
+        elections = Election.objects.select_related(
+            'academic_year',
+            'level',
+            'institution'
+        ).prefetch_related(
+            'electionposition_set__candidate_set'
+        )
+
+        # Apply filters
+        if level:
+            elections = elections.filter(level__level=level)
+        if status:
+            elections = elections.filter(status=status)
+        if academic_year:
+            elections = elections.filter(academic_year__id=academic_year)
+
+        # Get statistics for each election
+        election_summaries = []
+        for election in elections:
+            stats = ElectionStatistics.objects.filter(election=election).first()
+            total_candidates = sum(
+                ep.candidate_set.count() 
+                for ep in election.electionposition_set.all()
+            )
+            
+            summary = {
+                'id': election.id,
+                'name': election.name,
+                'status': election.status,
+                'start_datetime': election.start_datetime,
+                'end_datetime': election.end_datetime,
+                'academic_year': election.academic_year,
+                'level': election.level,
+                'institution': election.institution,
+                'total_candidates': total_candidates,
+                'total_voters': stats.total_voters if stats else 0,
+                'total_votes_cast': stats.total_votes_cast if stats else 0,
+                'voter_turnout': float(stats.voter_turnout) if stats else 0,
+                'leading_candidate': (
+                    f"{stats.leading_candidate.student.user.first_name} {stats.leading_candidate.student.user.last_name}"
+                    if stats and stats.leading_candidate else None
+                )
+            }
+            election_summaries.append(summary)
+
+        # Calculate distributions
+        status_distribution = (
+            Election.objects.values('status')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        
+        level_distribution = (
+            Election.objects.values('level__level')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+
+        # Calculate yearly turnout
+        yearly_turnout = (
+            ElectionStatistics.objects
+            .values('election__academic_year__name')
+            .annotate(
+                avg_turnout=Avg('voter_turnout'),
+                election_count=Count('id')
+            )
+            .order_by('election__academic_year__start_date')
+        )
+
+        return ElectionListType(
+            elections=election_summaries,
+            status_distribution=[
+                {'status': item['status'], 'count': item['count']}
+                for item in status_distribution
+            ],
+            level_distribution=[
+                {'level': item['level__level'], 'count': item['count']}
+                for item in level_distribution
+            ],
+            yearly_turnout=[
+                {
+                    'year': item['election__academic_year__name'],
+                    'turnout': float(item['avg_turnout']),
+                    'election_count': item['election_count']
+                }
+                for item in yearly_turnout
+            ]
+        )

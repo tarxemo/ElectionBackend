@@ -39,35 +39,132 @@ class InstitutionLevelType(DjangoObjectType):
         model = InstitutionLevel
         fields = '__all__'
 
+# class InstitutionType(DjangoObjectType):
+#     class Meta:
+#         model = Institution
+#         fields = '__all__'
+
+#     parent = graphene.Field(lambda: InstitutionType)
+#     children = graphene.List(lambda: InstitutionType)
+#     hierarchy = graphene.List(lambda: InstitutionType)
+#     student_count = graphene.Int()
+#     leader_count = graphene.Int()
+    
+#     def resolve_parent(self, info):
+#         return self.parent
+    
+#     def resolve_children(self, info):
+#         return self.institution_set.all()
+    
+#     def resolve_hierarchy(self, info):
+#         def get_hierarchy(obj):
+#             if obj.parent:
+#                 return get_hierarchy(obj.parent) + [obj]
+#             return [obj]
+#         return get_hierarchy(self)
+    
+#     def resolve_student_count(self, info):
+#         return self.student_set.count()
+    
+#     def resolve_leader_count(self, info):
+#         return self.leader_set.count()
+
+class LeaderType(DjangoObjectType):
+    class Meta:
+        model = Leader
+        fields = '__all__'
+
+class ElectionStatisticsType(DjangoObjectType):
+    class Meta:
+        model = ElectionStatistics
+        fields = '__all__'
+ 
+class ElectionTrendType(graphene.ObjectType):
+    year = graphene.String()
+    elections = graphene.Int()
+    voters = graphene.Int()
+    turnout = graphene.Float()
+           
 class InstitutionType(DjangoObjectType):
     class Meta:
         model = Institution
-        fields = '__all__'
+        fields = "__all__"
 
-    parent = graphene.Field(lambda: InstitutionType)
     children = graphene.List(lambda: InstitutionType)
-    hierarchy = graphene.List(lambda: InstitutionType)
-    student_count = graphene.Int()
-    leader_count = graphene.Int()
-    
-    def resolve_parent(self, info):
-        return self.parent
-    
+    leaders = graphene.List(LeaderType)
+    election_stats = graphene.Field(ElectionStatisticsType)
+    vote_distribution = graphene.JSONString()
+    voter_turnout_history = graphene.JSONString()
+    position_breakdown = graphene.JSONString()
+
     def resolve_children(self, info):
-        return self.institution_set.all()
-    
-    def resolve_hierarchy(self, info):
-        def get_hierarchy(obj):
-            if obj.parent:
-                return get_hierarchy(obj.parent) + [obj]
-            return [obj]
-        return get_hierarchy(self)
-    
-    def resolve_student_count(self, info):
-        return self.student_set.count()
-    
-    def resolve_leader_count(self, info):
-        return self.leader_set.count()
+        return Institution.objects.filter(parent=self)
+
+    def resolve_leaders(self, info):
+        return Leader.objects.filter(
+            institution=self,
+            is_active=True
+        ).select_related('candidate__student__user', 'position')
+
+    def resolve_election_stats(self, info):
+        return ElectionStatistics.objects.filter(
+            election__institution=self
+        ).order_by('-election__start_datetime').first()
+
+    def resolve_vote_distribution(self, info):
+        elections = Election.objects.filter(institution=self, status='COMPLETED')
+        data = []
+        
+        for election in elections:
+            results = ElectionResult.objects.filter(
+                election=election
+            ).select_related('candidate__student__user')
+            
+            for result in results:
+                data.append({
+                    'election': election.name,
+                    'candidate': f"{result.candidate.student.user.firstName} {result.candidate.student.user.lastName}",
+                    'votes': result.total_votes,
+                    'percentage': float(result.percentage),
+                    'isWinner': result.is_winner
+                })
+        
+        return data
+
+    def resolve_voter_turnout_history(self, info):
+        stats = ElectionStatistics.objects.filter(
+            election__institution=self
+        ).order_by('election__start_datetime')
+        
+        return [{
+            'election': stat.election.name,
+            'year': stat.election.academic_year.name,
+            'turnout': float(stat.voter_turnout),
+            'totalVoters': stat.total_voters,
+            'votesCast': stat.total_votes_cast
+        } for stat in stats]
+
+    def resolve_position_breakdown(self, info):
+        positions = Position.objects.filter(institution=self)
+        data = []
+        
+        for position in positions:
+            leaders = Leader.objects.filter(position=position).count()
+            elections = ElectionPosition.objects.filter(position=position).count()
+            data.append({
+                'position': position.name,
+                'leadersCount': leaders,
+                'electionsCount': elections,
+                'description': position.description
+            })
+        
+        return data
+
+class InstitutionDetails(graphene.ObjectType):
+    institution = graphene.Field(InstitutionType)
+    parent_institution = graphene.Field(InstitutionType)
+    child_institutions = graphene.List(InstitutionType)
+    hierarchy = graphene.JSONString()
 
 class PositionType(DjangoObjectType):
     class Meta:
@@ -90,7 +187,7 @@ class StudentType(DjangoObjectType):
     class Meta:
         model = Student
         fields = '__all__'
-        exclude = ('user',)
+        # exclude = ('user',)
 
     full_name = graphene.String()
     email = graphene.String()
