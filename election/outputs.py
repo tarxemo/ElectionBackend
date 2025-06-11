@@ -1,103 +1,190 @@
+# output.py
 import graphene
-from graphene import ObjectType, DateTime, Decimal, UUID
-from .models import University, College, Hostel, Student, Position, Candidate, Election, Vote, LeaderPromise, PromiseImplementation, LeaderRating
+from graphene_django.types import DjangoObjectType
+from .models import (
+    AcademicYear,
+    InstitutionLevel,
+    Institution,
+    Position,
+    Student,
+    Election,
+    ElectionPosition,
+    Candidate,
+    Vote,
+    ElectionResult,
+    Leader,
+    Promise,
+    PromiseUpdate,
+    Rating,
+    ElectionStatistics
+)
 
-class ElectionStats(graphene.ObjectType):
-    active_elections = graphene.Int()
-    total_votes = graphene.Int()
-    registered_voters = graphene.Int()
-    total_candidates = graphene.Int()
-    participation_rate = graphene.Float()
-    
-# Output Object for User
-class UserOutput(ObjectType):
+class UserOutput(graphene.ObjectType):
     id = graphene.ID()
     username = graphene.String()
-    email = graphene.String()
     first_name = graphene.String()
     last_name = graphene.String()
+    email = graphene.String()
+    is_active = graphene.Boolean()
+    date_joined = graphene.DateTime()
 
-# Output Object for University
-class UniversityOutput(ObjectType):
+class AcademicYearOutput(graphene.ObjectType):
+    id = graphene.ID()
+    name = graphene.String()
+    start_date = graphene.Date()
+    end_date = graphene.Date()
+    is_current = graphene.Boolean()
+
+class InstitutionLevelOutput(graphene.ObjectType):
+    id = graphene.ID()
+    level = graphene.String()
+    display_level = graphene.String()
+    
+    def resolve_display_level(self, info):
+        return self.get_level_display()
+
+class InstitutionOutput(graphene.ObjectType):
+    id = graphene.ID()
+    name = graphene.String()
+    level = graphene.Field(InstitutionLevelOutput)
+    parent = graphene.Field(lambda: InstitutionOutput)
+    description = graphene.String()
+    created_at = graphene.DateTime()
+
+class PositionOutput(graphene.ObjectType):
     id = graphene.ID()
     name = graphene.String()
     description = graphene.String()
+    level = graphene.Field(InstitutionLevelOutput)
+    institution = graphene.Field(InstitutionOutput)
+    voting_power = graphene.Int()
 
-# Output Object for College
-class CollegeOutput(ObjectType):
+class StudentOutput(graphene.ObjectType):
     id = graphene.ID()
-    name = graphene.String()
-    university = graphene.Field(UniversityOutput)
-    description = graphene.String()
-
-# Output Object for Hostel
-class HostelOutput(ObjectType):
-    id = graphene.ID()
-    name = graphene.String()
-    college = graphene.Field(CollegeOutput)
-    description = graphene.String()
-
-# Output Object for Student
-class StudentOutput(ObjectType):
-    id = graphene.ID()
-    user = graphene.Field(UserOutput)  # Assuming you have a UserOutput type for the User model
-    hostel = graphene.Field(HostelOutput)
-    college = graphene.Field(CollegeOutput)
-    university = graphene.Field(UniversityOutput)
+    user = graphene.Field(UserOutput)
+    institution = graphene.Field(InstitutionOutput)
+    academic_year = graphene.Field(AcademicYearOutput)
+    is_active = graphene.Boolean()
     is_candidate = graphene.Boolean()
+    
+    # Additional fields for specific institution types
+    hostel = graphene.Field(lambda: InstitutionOutput)
+    college = graphene.Field(lambda: InstitutionOutput)
+    university = graphene.Field(lambda: InstitutionOutput)
+    
+    def resolve_hostel(self, info):
+        if self.institution.level.level == 'HOSTEL':
+            return self.institution
+        return None
+    
+    def resolve_college(self, info):
+        if self.institution.level.level == 'COLLEGE':
+            return self.institution
+        return None
+    
+    def resolve_university(self, info):
+        if self.institution.level.level == 'UNIVERSITY':
+            return self.institution
+        return None
 
-# Output Object for Position
-class PositionOutput(ObjectType):
+class ElectionOutput(graphene.ObjectType):
     id = graphene.ID()
     name = graphene.String()
-    level = graphene.String()
     description = graphene.String()
-
-# Output Object for Candidate
-class CandidateOutput(ObjectType):
-    id = graphene.ID()
-    student = graphene.Field(StudentOutput)
-    position = graphene.Field(PositionOutput)
-    manifesto = graphene.String()
-
-# Output Object for Election
-class ElectionOutput(ObjectType):
-    id = graphene.ID()
-    name = graphene.String()
-    level = graphene.String()
-    start_date = DateTime()
-    end_date = DateTime()
-    positions = graphene.List(PositionOutput)
-    description = graphene.String()
-
-# Output Object for Vote
-class VoteOutput(ObjectType):
-    id = graphene.ID()
-    student = graphene.Field(StudentOutput)
-    candidate = graphene.Field(CandidateOutput)
-    election = graphene.Field(ElectionOutput)
-    timestamp = DateTime()
-
-# Output Object for LeaderPromise
-class LeaderPromiseOutput(ObjectType):
-    id = graphene.ID()
-    candidate = graphene.Field(CandidateOutput)
-    promise = graphene.String()
-    timestamp = DateTime()
-
-# Output Object for PromiseImplementation
-class PromiseImplementationOutput(ObjectType):
-    id = graphene.ID()
-    promise = graphene.Field(LeaderPromiseOutput)
     status = graphene.String()
-    update = graphene.String()
-    timestamp = DateTime()
+    display_status = graphene.String()
+    start_datetime = graphene.DateTime()
+    end_datetime = graphene.DateTime()
+    academic_year = graphene.Field(AcademicYearOutput)
+    level = graphene.Field(InstitutionLevelOutput)
+    institution = graphene.Field(InstitutionOutput)
+    is_active = graphene.Boolean()
+    
+    def resolve_display_status(self, info):
+        return self.get_status_display()
+    
+    def resolve_is_active(self, info):
+        from django.utils import timezone
+        now = timezone.now()
+        return self.start_datetime <= now <= self.end_datetime and self.status == 'ACTIVE'
 
-# Output Object for LeaderRating
-class LeaderRatingOutput(ObjectType):
+class ElectionPositionOutput(graphene.ObjectType):
     id = graphene.ID()
-    leader = graphene.Field(CandidateOutput)
+    election = graphene.Field(ElectionOutput)
+    position = graphene.Field(PositionOutput)
+    max_candidates = graphene.Int()
+
+class CandidateOutput(graphene.ObjectType):
+    id = graphene.ID()
     student = graphene.Field(StudentOutput)
-    rating = graphene.Int()
+    election_position = graphene.Field(ElectionPositionOutput)
+    manifesto = graphene.String()
+    is_approved = graphene.Boolean()
+    approved_at = graphene.DateTime()
+    created_at = graphene.DateTime()
+    total_votes = graphene.Int()
+    
+    def resolve_total_votes(self, info):
+        return self.votes.count()
+
+class VoteOutput(graphene.ObjectType):
+    id = graphene.ID()
+    election = graphene.Field(ElectionOutput)
+    candidate = graphene.Field(CandidateOutput)
+    voter = graphene.Field(StudentOutput)
+    timestamp = graphene.DateTime()
+    weight = graphene.Int()
+
+class ElectionResultOutput(graphene.ObjectType):
+    id = graphene.ID()
+    election = graphene.Field(ElectionOutput)
+    candidate = graphene.Field(CandidateOutput)
+    total_votes = graphene.Int()
+    percentage = graphene.Float()
+    position_rank = graphene.Int()
+    is_winner = graphene.Boolean()
+    calculated_at = graphene.DateTime()
+
+class LeaderOutput(graphene.ObjectType):
+    id = graphene.ID()
+    candidate = graphene.Field(CandidateOutput)
+    position = graphene.Field(PositionOutput)
+    institution = graphene.Field(InstitutionOutput)
+    start_date = graphene.Date()
+    end_date = graphene.Date()
+    is_active = graphene.Boolean()
+
+class PromiseOutput(graphene.ObjectType):
+    id = graphene.ID()
+    candidate = graphene.Field(CandidateOutput)
+    title = graphene.String()
+    description = graphene.String()
+    created_at = graphene.DateTime()
+
+class PromiseUpdateOutput(graphene.ObjectType):
+    id = graphene.ID()
+    promise = graphene.Field(PromiseOutput)
+    status = graphene.String()
+    display_status = graphene.String()
+    update = graphene.String()
+    timestamp = graphene.DateTime()
+    
+    def resolve_display_status(self, info):
+        return self.get_status_display()
+
+class RatingOutput(graphene.ObjectType):
+    id = graphene.ID()
+    leader = graphene.Field(LeaderOutput)
+    student = graphene.Field(StudentOutput)
+    score = graphene.Int()
     comment = graphene.String()
-    timestamp = DateTime()
+    timestamp = graphene.DateTime()
+
+class ElectionStatisticsOutput(graphene.ObjectType):
+    id = graphene.ID()
+    election = graphene.Field(ElectionOutput)
+    total_voters = graphene.Int()
+    total_votes_cast = graphene.Int()
+    voter_turnout = graphene.Float()
+    leading_candidate = graphene.Field(CandidateOutput)
+    calculated_at = graphene.DateTime()

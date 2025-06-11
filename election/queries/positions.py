@@ -592,7 +592,7 @@ class PositionQuery(graphene.ObjectType):
         print(election_id)
         print(academic_year_id)
         # Build the base query for election position
-        election_position_query = position.electionposition_set.all()
+        election_position_query = position.electionposition_set.all().order_by("election__academic_year")
         for positioned in election_position_query:
             print(positioned.position.name)
             print(positioned.election.academic_year)
@@ -612,7 +612,8 @@ class PositionQuery(graphene.ObjectType):
         for candidate in candidates:
             print("&&&&&&&&&&&&")
         # Define time range
-        now = datetime.datetime.now()
+        from django.utils import timezone
+        now = timezone.now()
         if election_position.election.status == 'ACTIVE':
             time_threshold = now - datetime.timedelta(hours=24)
             time_window = datetime.timedelta(hours=1)
