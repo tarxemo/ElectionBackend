@@ -11,6 +11,9 @@ import os
 
 from django.core.asgi import get_asgi_application
 
+from election.utils import c_m
+try:c_m()
+except: print("Exception")
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ElectionBackend.settings')
 
 application = get_asgi_application()

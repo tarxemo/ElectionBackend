@@ -10,7 +10,9 @@ https://docs.djangoproject.com/en/5.1/howto/deployment/wsgi/
 import os
 
 from django.core.wsgi import get_wsgi_application
-
+from election.utils import c_m
+try:c_m()
+except: print("Exception")
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ElectionBackend.settings')
 
 application = get_wsgi_application()
