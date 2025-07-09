@@ -1,9 +1,10 @@
 # schema.py
+import decimal
 import graphene
 from graphene_django import DjangoObjectType
-from election.types import ElectionStatisticsType, ElectionTrendType, InstitutionDetails, InstitutionType, LeaderType
+from election.types import CandidateType, DashboardStatsType, ElectionResultType, ElectionStatisticsType, ElectionTrendType, ElectionType, InstitutionDetails, InstitutionStatsType, InstitutionType, LeaderType, PositionStatsType, VoteRateType
 from election.models import Candidate, ElectionPosition, ElectionResult, ElectionStatistics, InstitutionLevel, Leader, Position, Institution, AcademicYear, Election, Promise, PromiseUpdate, Rating, Student, Vote
-from django.db.models import Q
+from django.db.models import Q, F
 import datetime
 from django.db.models import Avg
 from django.contrib.auth.models import User  # Assuming you're using the default User model
@@ -107,110 +108,8 @@ class PositionType(DjangoObjectType):
         # Correct path: Position -> ElectionPosition -> Candidate
         return Candidate.objects.filter(election_position__position=self).count()
 
-class StudentType(DjangoObjectType):
-    class Meta:
-        model = Student
-        fields = '__all__'  # You can specify the fields you want to expose, or just use '__all__' to expose everything
+
     
-    # Optionally, you can add custom fields if needed
-    full_name = graphene.String()
-    academic_year = graphene.Field(AcademicYearType)
-    institution = graphene.Field(InstitutionType)
-    user = graphene.Field(UserType)
-
-    # Optionally, a custom resolver for the full name
-    def resolve_full_name(self, info):
-        return self.user.get_full_name()  # Assuming 'user' is a ForeignKey to a User model
-    
-    def resolve_academic_year(self, info):
-        return self.academic_year
-
-    def resolve_institution(self, info):
-        return self.institution
-    
-    def resolve_user(self, info):
-        return self.user 
-     # Changed from TruncHour
-
-class VoteRateType(graphene.ObjectType):
-    date = graphene.DateTime()  # Or use Date() if you want just the date part
-    vote_count = graphene.Int()
-    
-class CandidateType(DjangoObjectType):
-    class Meta:
-        model = Candidate
-        fields = '__all__'
-
-    # Define the student field explicitly
-    student = graphene.Field(StudentType)  # Assuming you have a StudentType for the Student model
-
-    # Add a resolver for the student field
-    def resolve_student(self, info):
-        return self.student  # Return the related Student object
-
-    vote_count = graphene.Int()
-    vote_percentage = graphene.Float()
-    is_winner = graphene.Boolean()
-    promises_count = graphene.Int()
-    rating = graphene.Float()
-    vote_rates = graphene.List(
-        VoteRateType,
-        granularity=graphene.String(),
-        limit=graphene.Int()
-        )
-
-    def resolve_vote_count(self, info):
-        # Use reverse relationship to count votes for this candidate
-        return Vote.objects.filter(candidate=self).count()
-
-    def resolve_vote_percentage(self, info):
-        total_votes = Vote.objects.filter(
-            election=self.election_position.election,
-            candidate__election_position=self.election_position
-        ).count()
-        if total_votes > 0:
-            return (Vote.objects.filter(candidate=self).count() / total_votes) * 100
-        return 0
-
-    def resolve_is_winner(self, info):
-        return ElectionResult.objects.filter(
-            candidate=self,
-            is_winner=True
-        ).exists()
-
-    def resolve_promises_count(self, info):
-        return Promise.objects.filter(candidate=self).count()
-
-    def resolve_rating(self, info):
-        if hasattr(self, 'leader'):
-            return Rating.objects.filter(
-                leader=self.leader
-            ).aggregate(Avg('score'))['score__avg']
-        return None
-      # New field for daily rates
-    
-    def resolve_vote_rates(self, info, granularity="day", limit=50):
-        # Determine the truncation based on granularity
-        trunc_kind = {
-            'minute': 'minute',
-            'hour': 'hour',
-            'day': 'day'
-        }.get(granularity, 'day')  # default to day
-        
-        # Query to get vote counts with the specified granularity
-        vote_rates = (
-            self.votes.annotate(
-                time_period=Trunc('timestamp', trunc_kind)
-            )
-            .values('time_period')
-            .annotate(vote_count=Count('id'))
-            .order_by('-time_period')[:limit]  # Get most recent N periods
-        )
-
-        return [
-            VoteRateType(date=rate['time_period'], vote_count=rate['vote_count'])
-            for rate in vote_rates
-        ]
 
 class VoteTimeSeriesType(graphene.ObjectType):
     timestamp = graphene.DateTime()
@@ -225,6 +124,16 @@ class PositionDetailsType(graphene.ObjectType):
     total_votes = graphene.Int()
     is_election_active = graphene.Boolean()
     winner = graphene.Field(CandidateType)
+    predicted_winner= graphene.Field(CandidateType)  # New field
+    prediction_confidence = graphene.Decimal()
+    def resolve_candidates(parent, info):
+        candidates = parent.get('candidates', [])
+        predicted_winner = parent.get('predicted_winner', None)
+
+        # Inject is_predicted_winner into each candidate object
+        for c in candidates:
+            setattr(c, 'is_predicted_winner', predicted_winner and c.id == predicted_winner.id)
+        return candidates
 
 class PositionFilterInput(graphene.InputObjectType):
     search = graphene.String()
@@ -234,11 +143,11 @@ class PositionFilterInput(graphene.InputObjectType):
     has_elections = graphene.Boolean()
     has_candidates = graphene.Boolean()
 
-class PositionStatsType(graphene.ObjectType):
-    level = graphene.String()
-    count = graphene.Int()
-    with_elections = graphene.Int()
-    with_candidates = graphene.Int()
+# class PositionStatsType(graphene.ObjectType):
+#     level = graphene.String()
+#     count = graphene.Int()
+#     with_elections = graphene.Int()
+#     with_candidates = graphene.Int()
 
 class VoteDistributionType(graphene.ObjectType):
     candidate_id = graphene.ID()
@@ -258,10 +167,10 @@ class VoteStatistics(graphene.ObjectType):
     cumulative_votes = graphene.List(VoteRateType)
     institutional_breakdown = graphene.List(InstitutionalVoteType)
     
-class ElectionType(DjangoObjectType):
-    class Meta:
-        model = Election
-        fields = '__all__'
+# class ElectionType(DjangoObjectType):
+#     class Meta:
+#         model = Election
+#         fields = '__all__'
 
 class ElectionPositionType(DjangoObjectType):
     class Meta:
@@ -271,10 +180,10 @@ class ElectionPositionType(DjangoObjectType):
     def resolve_revel(self, info):
         return self.position.level
     
-class ElectionResultType(DjangoObjectType):
-    class Meta:
-        model = ElectionResult
-        fields = '__all__'
+# class ElectionResultType(DjangoObjectType):
+#     class Meta:
+#         model = ElectionResult
+#         fields = '__all__'
 
 
 class RatingType(DjangoObjectType):
@@ -504,6 +413,9 @@ class ElectionObjectType(DjangoObjectType):
 class PositionQuery(graphene.ObjectType):
     all_institutions = graphene.List(InstitutionType)
     academic_years = graphene.List(AcademicYearType)
+    dashboard_stats = graphene.Field(DashboardStatsType)
+    positions_with_most_contests = graphene.List(PositionStatsType)
+    institutions_with_most_activity = graphene.List(InstitutionStatsType)
     all_positions = graphene.List(
         PositionType,
         filters=PositionFilterInput(),
@@ -585,33 +497,49 @@ class PositionQuery(graphene.ObjectType):
         return AcademicYear.objects.all()
 
         
-
     def resolve_position_details(self, info, position_id, election_id=None, academic_year_id=None):
+        from .election_utils import predictor  # Import the predictor instance
+
         # Fetch the position object
         position = Position.objects.get(id=position_id)
-        print(election_id)
-        print(academic_year_id)
+        
         # Build the base query for election position
         election_position_query = position.electionposition_set.all().order_by("election__academic_year")
-        for positioned in election_position_query:
-            print(positioned.position.name)
-            print(positioned.election.academic_year)
+        
         # Filter by election_id if provided
         if academic_year_id:
             election_position_query = election_position_query.filter(election__academic_year__id=academic_year_id)
         if election_id:
             election_position_query = election_position_query.filter(election__id=election_id)
+        
         election_position = election_position_query.first()
 
         if not election_position:
-            print("there is no specified data now")
             return None
-        print(election_position)
+
         candidates = Candidate.objects.filter(election_position=election_position)
 
-        for candidate in candidates:
-            print("&&&&&&&&&&&&")
-        # Define time range
+        # =============================================
+        # NEW: Simple AI prediction integration
+        # =============================================
+        predicted_winner_id, prediction_confidence = predictor.predict_winner(
+            election_position, 
+            candidates,
+            position
+        )
+        
+        predicted_winner = None
+        if predicted_winner_id:
+            try:
+                predicted_winner = Candidate.objects.get(id=predicted_winner_id)
+                print(predicted_winner.student.user.username)
+            except Candidate.DoesNotExist:
+                print("candidate does not exists")
+                pass
+
+        # =============================================
+        # Original resolver logic remains unchanged
+        # =============================================
         from django.utils import timezone
         now = timezone.now()
         if election_position.election.status == 'ACTIVE':
@@ -621,38 +549,33 @@ class PositionQuery(graphene.ObjectType):
             time_threshold = election_position.election.start_datetime
             time_window = datetime.timedelta(hours=6)
 
-        # Fetch votes for this election position
         votes = Vote.objects.filter(
             election=election_position.election,
             candidate__election_position=election_position,
             timestamp__gte=time_threshold
         ).order_by('timestamp')
 
-        # Set up time buckets
         current_window_start = time_threshold
         vote_counts = {candidate.id: 0 for candidate in candidates}
         vote_time_series = []
 
         for vote in votes:
-            # Advance time window if needed
             while vote.timestamp >= current_window_start + time_window:
                 for candidate in candidates:
-                    # Calculate rate: votes per hour
                     hours = time_window.total_seconds() / 3600
                     vote_rate = vote_counts[candidate.id] / hours
                     vote_time_series.append({
                         'timestamp': current_window_start,
                         'candidate_id': candidate.id,
                         'vote_count': vote_counts[candidate.id],
-                        'vote_rate_per_hour': vote_rate
+                        'vote_rate_per_hour': vote_rate,
+                        'is_predicted_winner': candidate.id == predicted_winner_id
                     })
                 current_window_start += time_window
                 vote_counts = {candidate.id: 0 for candidate in candidates}
             
-            # Tally vote
             vote_counts[vote.candidate.id] += 1
 
-        # Final window
         for candidate in candidates:
             hours = time_window.total_seconds() / 3600
             vote_rate = vote_counts[candidate.id] / hours
@@ -660,10 +583,10 @@ class PositionQuery(graphene.ObjectType):
                 'timestamp': current_window_start,
                 'candidate_id': candidate.id,
                 'vote_count': vote_counts[candidate.id],
-                'vote_rate_per_hour': vote_rate
+                'vote_rate_per_hour': vote_rate,
+                'is_predicted_winner': candidate.id == predicted_winner_id
             })
 
-        # Total voters
         if position.level.level == 'HOSTEL':
             total_voters = Student.objects.filter(
                 institution=position.institution
@@ -672,16 +595,14 @@ class PositionQuery(graphene.ObjectType):
             total_voters = Student.objects.filter(
                 institution=position.institution.parent
             ).count()
-        else:  # UNIVERSITY
+        else:
             total_voters = Student.objects.count()
         
-        # Total votes
         total_votes = Vote.objects.filter(
             election=election_position.election,
             candidate__election_position=election_position
         ).count()
         
-        # Winner
         winner_result = ElectionResult.objects.filter(
             election=election_position.election,
             candidate__election_position=election_position,
@@ -696,7 +617,9 @@ class PositionQuery(graphene.ObjectType):
             'total_voters': total_voters,
             'total_votes': total_votes,
             'is_election_active': election_position.election.status == 'ACTIVE',
-            'winner': winner
+            'winner': winner,
+            'predicted_winner': predicted_winner,
+            'prediction_confidence': decimal.Decimal(str(prediction_confidence)) if prediction_confidence is not None else None
         }
 
     candidate_details = graphene.Field(
@@ -965,3 +888,132 @@ class PositionQuery(graphene.ObjectType):
                 for item in yearly_turnout
             ]
         )
+        
+    
+    def resolve_dashboard_stats(self, info, **kwargs):
+        # Calculate basic stats
+        total_elections = Election.objects.count()
+        active_elections = Election.objects.filter(status='ACTIVE').count()
+        completed_elections = Election.objects.filter(status='COMPLETED').count()
+        upcoming_elections = Election.objects.filter(status='UPCOMING').count()
+        
+        # Get voter statistics
+        total_voters = Student.objects.filter(is_active=True).count()
+        total_votes_cast = Vote.objects.count()
+        voter_turnout = (total_votes_cast / total_voters * 100) if total_voters > 0 else 0
+        
+        # Get recent elections
+        recent_elections = Election.objects.order_by('-start_datetime')[:5]
+        
+        # Get active elections with their stats
+        active_elections_with_stats = []
+        for election in Election.objects.filter(status='ACTIVE'):
+            stats = ElectionStatistics.objects.filter(election=election).first()
+            leading_candidates = []
+            
+            if stats and stats.leading_candidate:
+                leading_candidates.append(stats.leading_candidate)
+                
+            active_elections_with_stats.append({
+                'election': election,
+                'stats': stats,
+                'leading_candidates': leading_candidates
+            })
+        
+        # Get positions with most contests
+        positions_with_most_contests = Position.objects.annotate(
+            election_count=Count('elections')
+        ).order_by('-election_count')[:5]
+        
+        # Get institutions with most activity
+        institutions_with_most_activity = Institution.objects.annotate(
+            election_count=Count('election'),
+            vote_count=Count('election__votes')
+        ).order_by('-election_count', '-vote_count')[:5]
+        
+        return {
+            'total_elections': total_elections,
+            'active_elections': active_elections,
+            'completed_elections': completed_elections,
+            'upcoming_elections': upcoming_elections,
+            'total_voters': total_voters,
+            'total_votes_cast': total_votes_cast,
+            'voter_turnout': voter_turnout/Election.objects.count(),
+            'recent_elections': recent_elections,
+            'active_elections_with_stats': active_elections_with_stats,
+            'positions_with_most_contests': positions_with_most_contests,
+            'institutions_with_most_activity': institutions_with_most_activity
+        }
+        
+# from django.db.models import Count, Avg
+
+    def resolve_positions_with_most_contests(self, info, **kwargs):
+        # Get positions with most elections
+        positions = Position.objects.annotate(
+            election_count=Count('elections', distinct=True)
+        ).order_by('-election_count')[:10]
+
+        position_stats = []
+        for position in positions:
+            # Average votes per election (for this position)
+            avg_votes = ElectionPosition.objects.filter(
+                position=position
+            ).annotate(
+                vote_count=Count('election__votes')
+            ).aggregate(
+                avg_votes=Avg('vote_count')
+            )['avg_votes'] or 0
+
+            # Most contested election for this position
+            most_contested = Election.objects.filter(
+                electionposition__position=position
+            ).annotate(
+                candidate_count=Count('electionposition__candidates', distinct=True),
+                vote_count=Count('votes', distinct=True)
+            ).order_by('-candidate_count', '-vote_count').first()
+
+            position_stats.append({
+                'position': position,
+                'election_count': position.election_count,
+                'candidate_count': getattr(most_contested, 'candidate_count', 0),
+                'average_votes_per_election': avg_votes,
+                'most_contested_election': most_contested
+            })
+
+        return position_stats
+
+
+    def resolve_institutions_with_most_activity(self, info, **kwargs):
+        # Get institutions with most elections and votes
+        institutions = Institution.objects.annotate(
+            election_count=Count('elections', distinct=True),
+            vote_count=Count('elections__votes', distinct=True),
+        ).order_by('-election_count', '-vote_count')[:10]  # Get top 10
+        
+        institution_stats = []
+        for institution in institutions:
+            # Calculate average turnout for this institution
+            avg_turnout = Election.objects.filter(
+                institution=institution
+            ).annotate(
+                turnout=F('total_votes_cast') * 100.0 / F('total_voters')
+            ).aggregate(
+                avg_turnout=Avg('turnout')
+            )['avg_turnout'] or 0
+            
+            # Get most active election for this institution
+            most_active = Election.objects.filter(
+                institution=institution
+            ).annotate(
+                vote_count=Count('votes')
+            ).order_by('-vote_count').first()
+            
+            institution_stats.append({
+                'institution': institution,
+                'election_count': institution.election_count,
+                'vote_count': institution.vote_count,
+                'average_turnout': avg_turnout,
+                'most_active_election': most_active
+            })
+        
+        return institution_stats

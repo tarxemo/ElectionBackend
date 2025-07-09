@@ -1,5 +1,6 @@
 import graphene
 from graphene_django import DjangoObjectType
+from election.types import CandidateType, ElectionType, VoteType
 from election.models import (
     AcademicYear, InstitutionLevel, Institution, Position,
     Student, Election, ElectionPosition, Candidate,
@@ -14,20 +15,20 @@ class AcademicYearType(DjangoObjectType):
         model = AcademicYear
         fields = "__all__"
 
-class ElectionType(DjangoObjectType):
-    class Meta:
-        model = Election
-        fields = "__all__"
+# class ElectionType(DjangoObjectType):
+#     class Meta:
+#         model = Election
+#         fields = "__all__"
 
-class CandidateType(DjangoObjectType):
-    class Meta:
-        model = Candidate
-        fields = "__all__"
+# class CandidateType(DjangoObjectType):
+#     class Meta:
+#         model = Candidate
+#         fields = "__all__"
 
-class VoteType(DjangoObjectType):
-    class Meta:
-        model = Vote
-        fields = "__all__"
+# class VoteType(DjangoObjectType):
+#     class Meta:
+#         model = Vote
+#         fields = "__all__"
 
 # Mutations
 class CreateElection(graphene.Mutation):

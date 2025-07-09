@@ -1,6 +1,13 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.db import transaction
+from datetime import datetime, timedelta
+import numpy as np
+from scipy import stats
+from collections import defaultdict
 
 class AcademicYear(models.Model):
     name = models.CharField(max_length=50, unique=True)
@@ -101,6 +108,36 @@ class ElectionPosition(models.Model):
     election = models.ForeignKey(Election, on_delete=models.CASCADE)
     position = models.ForeignKey(Position, on_delete=models.CASCADE)
     max_candidates = models.PositiveIntegerField(default=1)
+    
+    
+    ai_win_prediction = models.ForeignKey(
+        "Candidate", 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='predicted_wins'
+    )  # AI's predicted winning candidate
+    ai_prediction_confidence = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        null=True, 
+        blank=True
+    )  # Confidence score (0-100)
+    ai_fraud_risk = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        null=True, 
+        blank=True
+    )  # Fraud risk score (0-100)
+    ai_fraud_indicators = models.JSONField(
+        null=True, 
+        blank=True
+    )  # Specific fraud indicators detected
+    ai_last_analysis = models.DateTimeField(
+        null=True, 
+        blank=True
+    ) 
+    
     
     class Meta:
         unique_together = ('election', 'position')
@@ -224,3 +261,10 @@ class ElectionStatistics(models.Model):
     
     def __str__(self):
         return f"Stats for {self.election}: {self.voter_turnout}% turnout"
+
+
+
+
+
+
+ 

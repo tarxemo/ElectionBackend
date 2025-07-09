@@ -1,11 +1,13 @@
 # schema.py
 import graphene
 from graphene_django import DjangoObjectType
+from election.types import VoteType
 from election.outputs import *
 from election.models import *
 from django.utils import timezone
-
+import datetime
 from django.db.models import Count, Sum, Avg, Q
+from django.utils import timezone
 # class ElectionType(DjangoObjectType):
 #     class Meta:
 #         model = Election
@@ -37,10 +39,10 @@ from django.db.models import Count, Sum, Avg, Q
 #     def resolve_total_votes(self, info):
 #         return self.votes.count()
 
-class VoteType(DjangoObjectType):
-    class Meta:
-        model = Vote
-        fields = "__all__"
+# class VoteType(DjangoObjectType):
+#     class Meta:
+#         model = Vote
+#         fields = "__all__"
 
 class VoteQuery(graphene.ObjectType):
     active_elections = graphene.List(ElectionOutput)
@@ -80,7 +82,7 @@ class VoteQuery(graphene.ObjectType):
             #     is_active=True
             # ).select_related('user', 'institution', 'academic_year')
             
-            qs = Student.objects.all()[:200]
+            qs = Student.objects.all()[200:400]
             # if search:
             #     qs = qs.filter(
             #         Q(user__first_name__icontains=search) |
@@ -141,6 +143,7 @@ class VoteMutation(graphene.ObjectType):
         input=CastVotesInput(required=True)
     )
     
+
     def resolve_cast_vote(self, info, input):
         try:
             election = Election.objects.get(pk=input.election_id)
@@ -173,7 +176,7 @@ class VoteMutation(graphene.ObjectType):
                 election=election,
                 candidate=candidate,
                 voter=voter,
-                weight=1  # Default weight
+                weight=1
             )
             
             return CastVotePayload(
@@ -187,57 +190,80 @@ class VoteMutation(graphene.ObjectType):
                 success=False,
                 message=str(e)
             )
+
     
+
     def resolve_cast_votes(self, info, input):
+        from django.utils import timezone
+        from graphql import GraphQLError
         try:
             votes_data = []
             created_votes = []
-            
-            # First validate all votes
+            now = timezone.now()
+
             for vote_input in input.votes:
-                election = Election.objects.get(pk=vote_input.election_id)
-                candidate = Candidate.objects.get(pk=vote_input.candidate_id)
-                voter = Student.objects.get(pk=vote_input.voter_id)
-                
-                # Check if election is active
-                now = timezone.now()
-                if not (election.start_datetime <= now <= election.end_datetime and election.status == 'ACTIVE'):
-                    raise Exception(f"Election {election.name} is not currently active")
-                
-                # Check if voter has already voted for this position
-                existing_vote = Vote.objects.filter(
+                # Fetch required objects
+                try:
+                    election = Election.objects.get(pk=vote_input.election_id)
+                    candidate = Candidate.objects.get(pk=vote_input.candidate_id)
+                    voter = Student.objects.get(pk=vote_input.voter_id)
+                except Election.DoesNotExist:
+                    raise GraphQLError(f"Election with ID {vote_input.election_id} does not exist")
+                except Candidate.DoesNotExist:
+                    raise GraphQLError(f"Candidate with ID {vote_input.candidate_id} does not exist")
+                except Student.DoesNotExist:
+                    raise GraphQLError(f"Student with ID {vote_input.voter_id} does not exist")
+
+                # Ensure election datetimes are timezone-aware
+                start_dt = election.start_datetime
+                end_dt = election.end_datetime
+
+                if timezone.is_naive(start_dt):
+                    start_dt = timezone.make_aware(start_dt)
+                if timezone.is_naive(end_dt):
+                    end_dt = timezone.make_aware(end_dt)
+
+                # Election must be active and within time
+                if not (start_dt <= now <= end_dt and election.status == 'ACTIVE'):
+                    raise GraphQLError(f"Election '{election.name}' is not currently active")
+
+                # Check if the voter has already voted for this position in this election
+                has_voted = Vote.objects.filter(
                     election=election,
                     voter=voter,
                     candidate__election_position=candidate.election_position
                 ).exists()
-                
-                if existing_vote:
-                    raise Exception(f"You have already voted for position {candidate.election_position.position.name}")
-                
+
+                if has_voted:
+                    raise GraphQLError(
+                        f"You have already voted for position '{candidate.election_position.position.name}' in election '{election.name}'"
+                    )
+
+                # Append validated vote info
                 votes_data.append({
                     'election': election,
                     'candidate': candidate,
                     'voter': voter
                 })
-            
-            # If all validations pass, create all votes
+
+            # All votes are valid, proceed to create them
             for vote_data in votes_data:
                 vote = Vote.objects.create(
                     election=vote_data['election'],
                     candidate=vote_data['candidate'],
                     voter=vote_data['voter'],
-                    weight=1  # Default weight
+                    weight=1  # default weight
                 )
                 created_votes.append(vote)
-            
+
             return CastVotesPayload(
                 success=True,
                 message="All votes cast successfully",
                 votes=created_votes
             )
-            
+
+        except GraphQLError as e:
+            return CastVotesPayload(success=False, message=str(e))
         except Exception as e:
-            return CastVotesPayload(
-                success=False,
-                message=str(e)
-            )
+            return CastVotesPayload(success=False, message="Unexpected error: " + str(e))
+
