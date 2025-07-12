@@ -23,9 +23,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-n910av*hk_chx1fby0)i13=z)(d+1ch^wj6z8dk5cu@4(e30(d'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = ["13.49.64.151", "udomsv.tarxemo.com", "udomelection.tarxemo.com"]
 
 
 # Application definition
@@ -124,9 +124,10 @@ WSGI_APPLICATION = 'ElectionBackend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'election2',
+        'NAME': 'election',
         'USER': 'tarxemo',
-        'PASSWORD': '123456',
+        # 'PASSWORD': '@SuperCoder',
+        'PASSWORD': '@SuperCoder',
         'HOST': 'localhost',  # Or your database server IP
         'PORT': '5432',  # Default PostgreSQL port
     }
