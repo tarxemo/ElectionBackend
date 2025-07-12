@@ -13012,6 +13012,12 @@ Bad Request: /graphql/
 /home/tarxemo/Desktop/VS/ElectionBackend/election/utils.py changed, reloading.
 Watching for file changes with StatReloader
 Watching for file changes with StatReloader
+<<<<<<< HEAD
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+Watching for file changes with StatReloader
+=======
 Bad Request: /graphql/
 Bad Request: /graphql/
 Bad Request: /graphql/
@@ -13021,3 +13027,4 @@ Bad Request: /graphql/
 Bad Request: /graphql/
 Bad Request: /graphql/
 Bad Request: /graphql/
+>>>>>>> 4bc2620cd7f539992a331a757932412a21272186
