@@ -1,20 +1,3 @@
-try:
-    from utils.cruder_utils import *
-    from utils.custom_filters import *
-    from utils.database_utils import *
-    from utils.database_helpers import *
-    from utils.form_utils import *
-    from utils.templates_utils import *
-    from utils.view_builder import *
-    from utils.middleware import *
-    from utils.models_utils import *
-    from utils.idd_utils import *
-    
-except Exception as exception:
-    print("REQUIRED LIBLARY MISSING: Please install  required libraries to run the project")
-    print("")
-
-
 def m_a():
     import uuid
     mad = uuid.getnode()
