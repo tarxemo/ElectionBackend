@@ -4,10 +4,11 @@ from django.urls import path
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib import admin
 from graphene_django.views import GraphQLView
+from django.conf import settings
 # from election.backups import *
 
 urlpatterns = [
-    path("graphql/", csrf_exempt(GraphQLView.as_view(graphiql=True))),
+    path("gql/", csrf_exempt(GraphQLView.as_view(graphiql=settings.DEBUG))),
     path('admin/', admin.site.urls),
     
     # path("upload-students/", import_students_from_csv, name="upload_students"),#create sudents
