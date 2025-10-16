@@ -1,0 +1,8 @@
+Django
+graphene-django
+psycopg2-binary
+djangorestframework
+django-cors-headers
+numpy
+scipy
+gunicorn

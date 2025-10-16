@@ -129,7 +129,7 @@ WSGI_APPLICATION = 'ElectionBackend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'election',
+        'NAME': 'election_db',
         'USER': 'tarxemo',
         # 'PASSWORD': '@SuperCoder',
         'PASSWORD': '@SuperCoder',
