@@ -3,7 +3,7 @@ graphene-django
 psycopg2-binary
 djangorestframework
 django-cors-headers
-numpy
+numpy==1.25.3
 scipy
 gunicorn
 pandas
