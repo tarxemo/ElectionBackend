@@ -131,10 +131,9 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'election_db',
         'USER': 'tarxemo',
-        # 'PASSWORD': '@SuperCoder',
         'PASSWORD': '@SuperCoder',
-        'HOST': 'localhost',  # Or your database server IP
-        'PORT': '5432',  # Default PostgreSQL port
+        'HOST': 'db',  # DO NOT use localhost here
+        'PORT': '5432',
     }
 }
 
