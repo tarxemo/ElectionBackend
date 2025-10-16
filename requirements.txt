@@ -6,3 +6,4 @@ django-cors-headers
 numpy
 scipy
 gunicorn
+pandas
