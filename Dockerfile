@@ -17,9 +17,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
+COPY requirements.txt .
+
+# Upgrade pip first
+RUN pip install --upgrade pip
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 EXPOSE 8000
