@@ -20,7 +20,7 @@ services:
     environment:
       POSTGRES_DB: election_db
       POSTGRES_USER: tarxemo
-      POSTGRES_PASSWORD: "@SuperCoder"
+      POSTGRES_PASSWORD: ""
 
 volumes:
   postgres_data:
