@@ -131,7 +131,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'election_db',
         'USER': 'tarxemo',
-        'PASSWORD': '@SuperCoder',
+        'PASSWORD': '',
         'HOST': 'db',  # DO NOT use localhost here
         'PORT': '5432',
     }
